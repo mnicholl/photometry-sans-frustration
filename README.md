@@ -1,4 +1,5 @@
-# photometry-sans-frustration
+# photometry-sans-frustration (psf)
+
 Interactive python wrapper for point-spread fitting (PSF) photometry using iraf/daophot tasks
 
 Requires two text files: one with transient coordinates and one with reference stars (see examples)
