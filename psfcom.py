@@ -49,6 +49,11 @@ import matplotlib.pyplot as plt
 from collections import OrderedDict
 from mpl_toolkits.mplot3d import Axes3D
 import argparse
+import requests
+try:
+    from queryPS1mast import queryPS1
+except:
+    print 'Warning: PS1 query package not found, must have sequence star data locally\n'
 
 
 ####### Parameters to vary if things aren't going well: #####################
@@ -61,42 +66,6 @@ import argparse
 # sigClip = 1         # Reject sequence stars if calculated ZP differs by this may sigma from the mean
 #
 #############
-
-
-parser = argparse.ArgumentParser()
-
-parser.add_argument('--ap', dest='aprad', default=10, type=int,
-                    help='Radius for aperture/PSF phot.')
-
-parser.add_argument('--npsf', dest='nPSF', default=10, type=int,
-                    help='Number of PSF stars.')
-
-parser.add_argument('--re', dest='recen_rad_stars', default=10, type=int,
-                    help='Radius for recentering on stars.')
-
-parser.add_argument('--resn', dest='recen_rad_sn', default=5, type=int,
-                    help='Radius for recentering on SN.')
-
-parser.add_argument('--var', dest='varOrd', default=0, type=int,
-                    help='Order for PSF model.')
-
-parser.add_argument('--sig', dest='sigClip', default=1, type=int,
-                    help='Sigma clipping for rejecting sequence stars.')
-
-parser.add_argument('--ims','-i', dest='file_to_reduce', default='', nargs='+',
-                    help='List of files to reduce. Accepts wildcards or '
-                    'space-delimited list.')
-
-parser.add_argument('--high', dest='z2', default=1, type=float,
-                    help='Colour scaling for zoomed images; upper bound is '
-                    'this value times the standard deviation of the counts.')
-
-parser.add_argument('--low', dest='z1', default=1, type=float,
-                    help='Colour scaling for zoomed images; lower bound is '
-                    'this value times the standard deviation of the counts.')
-
-
-args = parser.parse_args()
 
 
 
@@ -146,8 +115,56 @@ for i in glob.glob('shifted_*'):
     os.remove(i)
 
 
+parser = argparse.ArgumentParser()
+
+parser.add_argument('--ims','-i', dest='file_to_reduce', default='', nargs='+',
+                    help='List of files to reduce. Accepts wildcards or '
+                    'space-delimited list.')
+
+parser.add_argument('--ap', dest='aprad', default=10, type=int,
+                    help='Radius for aperture/PSF phot.')
+
+parser.add_argument('--sky', dest='skyrad', default=10, type=int,
+                    help='Width of annulus for sky background.')
+
+parser.add_argument('--npsf', dest='nPSF', default=10, type=int,
+                    help='Number of PSF stars.')
+
+parser.add_argument('--re', dest='recen_rad_stars', default=10, type=int,
+                    help='Radius for recentering on stars.')
+
+parser.add_argument('--resn', dest='recen_rad_sn', default=5, type=int,
+                    help='Radius for recentering on SN.')
+
+parser.add_argument('--var', dest='varOrd', default=0, type=int,
+                    help='Order for PSF model.')
+
+parser.add_argument('--sig', dest='sigClip', default=1, type=int,
+                    help='Sigma clipping for rejecting sequence stars.')
+
+parser.add_argument('--high', dest='z2', default=1, type=float,
+                    help='Colour scaling for zoomed images; upper bound is '
+                    'this value times the standard deviation of the counts.')
+
+parser.add_argument('--low', dest='z1', default=1, type=float,
+                    help='Colour scaling for zoomed images; lower bound is '
+                    'this value times the standard deviation of the counts.')
+
+parser.add_argument('--keepsub', dest='keep_sub', default=False, action='store_true',
+                    help='Do not delete residual images during clean-up ')
+
+parser.add_argument('--magmin', dest='magmin', default=21.5, type=float,
+                    help='Faintest sequence stars to return from PS1 query ')
+
+parser.add_argument('--magmax', dest='magmax', default=16.5, type=float,
+                    help='Brightest sequence stars to return from PS1 query ')
+
+
+args = parser.parse_args()
+
 
 aprad = args.aprad
+skyrad = args.skyrad
 nPSF = args.nPSF
 recen_rad_stars = args.recen_rad_stars
 recen_rad_sn = args.recen_rad_sn
@@ -155,6 +172,8 @@ varOrd = args.varOrd
 sigClip = args.sigClip
 z1 = args.z1
 z2 = args.z2
+magmin = args.magmin
+magmax = args.magmax
 
 ims = [i for i in args.file_to_reduce]
 
@@ -272,7 +291,11 @@ if len(suggSeq)==0:
 if len(suggSeq)>0:
     seqFile = suggSeq[0]
 else:
-    sys.exit('Error: no sequence stars (*_seq.txt) found')
+    print 'No sequence star data found locally...'
+    queryPS1(RAdec[0],RAdec[1],magmin,magmax)
+    seqFile = 'PS1_seq.txt'
+    # except:
+    #     sys.exit('Error: no sequence stars (*_seq.txt) found')
 
 print '\n####################\n\nSequence star magnitudes found: '+seqFile
 

@@ -50,6 +50,12 @@ from collections import OrderedDict
 from mpl_toolkits.mplot3d import Axes3D
 import argparse
 from matplotlib.patches import Circle
+import requests
+try:
+    from queryPS1mast import queryPS1
+except:
+    print 'Warning: PS1 query package not found, must have sequence star data locally\n'
+
 
 ####### Parameters to vary if things aren't going well: #####################
 #
@@ -63,7 +69,60 @@ from matplotlib.patches import Circle
 #############
 
 
+for i in glob.glob('*.mag.*'):
+    os.remove(i)
+
+for i in glob.glob('*.als.*'):
+    os.remove(i)
+
+for i in glob.glob('*.arj.*'):
+    os.remove(i)
+
+for i in glob.glob('*.sub.*'):
+    os.remove(i)
+
+for i in glob.glob('*.pst.*'):
+    os.remove(i)
+
+for i in glob.glob('*psf.*'):
+    os.remove(i)
+
+for i in glob.glob('*.psg.*'):
+    os.remove(i)
+
+for i in glob.glob('*_seqMags.txt'):
+    os.remove(i)
+
+for i in glob.glob('*pix*fits'):
+    os.remove(i)
+
+for i in glob.glob('*_psf_stars.txt'):
+    os.remove(i)
+
+for i in glob.glob('refcoords.txt'):
+    os.remove(i)
+
+for i in glob.glob('imagelist.txt'):
+    os.remove(i)
+
+for i in glob.glob('comlist.txt'):
+    os.remove(i)
+
+for i in glob.glob('shifts.txt'):
+    os.remove(i)
+
+for i in glob.glob('shifted_*'):
+    os.remove(i)
+
+
 parser = argparse.ArgumentParser()
+
+parser.add_argument('--ims','-i', dest='file_to_reduce', default='', nargs='+',
+                    help='List of files to reduce. Accepts wildcards or '
+                    'space-delimited list.')
+
+parser.add_argument('--psf','-p', dest='psf_file', default='',
+                    help='PSF file from previous run.')
 
 parser.add_argument('--ap', dest='aprad', default=10, type=int,
                     help='Radius for aperture/PSF phot.')
@@ -74,13 +133,6 @@ parser.add_argument('--sky', dest='skyrad', default=10, type=int,
 parser.add_argument('--resn', dest='recen_rad_sn', default=5, type=int,
                     help='Radius for recentering on SN.')
 
-parser.add_argument('--ims','-i', dest='file_to_reduce', default='', nargs='+',
-                    help='List of files to reduce. Accepts wildcards or '
-                    'space-delimited list.')
-
-parser.add_argument('--psf','-p', dest='psf_file', default='',
-                    help='PSF file from previous run.')
-
 parser.add_argument('--high', dest='z2', default=1, type=float,
                     help='Colour scaling for zoomed images; upper bound is '
                     'this value times the standard deviation of the counts.')
@@ -89,6 +141,15 @@ parser.add_argument('--low', dest='z1', default=1, type=float,
                     help='Colour scaling for zoomed images; lower bound is '
                     'this value times the standard deviation of the counts.')
 
+parser.add_argument('--keepsub', dest='keep_sub', default=False, action='store_true',
+                    help='Do not delete residual images during clean-up ')
+
+parser.add_argument('--magmin', dest='magmin', default=21.5, type=float,
+                    help='Faintest sequence stars to return from PS1 query ')
+
+parser.add_argument('--magmax', dest='magmax', default=16.5, type=float,
+                    help='Brightest sequence stars to return from PS1 query ')
+
 
 
 args = parser.parse_args()
@@ -96,9 +157,12 @@ args = parser.parse_args()
 
 aprad = args.aprad
 skyrad = args.skyrad
+nPSF = args.nPSF
 recen_rad_sn = args.recen_rad_sn
 z1 = args.z1
 z2 = args.z2
+magmin = args.magmin
+magmax = args.magmax
 
 PSF0 = args.psf_file
 

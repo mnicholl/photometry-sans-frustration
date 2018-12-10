@@ -16,6 +16,69 @@ from collections import OrderedDict
 from mpl_toolkits.mplot3d import Axes3D
 import argparse
 from matplotlib.patches import Circle
+import requests
+try:
+    from queryPS1mast import queryPS1
+except:
+    print 'Warning: PS1 query package not found, must have sequence star data locally\n'
+
+####### Parameters to vary if things aren't going well: #####################
+#
+# aprad = 10      # aperture radius for phot
+# nPSF = 10              # number of PSF stars to try
+# recen_rad_stars = 10     # recentering radius: increase if centroid not found; decrease if wrong centroid found!
+# recen_rad_sn = 5
+# varOrd = 0             # PSF model order: -1 = pure analytic, 2 = high-order empirical corrections, 0/1 intermediate
+# sigClip = 1         # Reject sequence stars if calculated ZP differs by this may sigma from the mean
+#
+#############
+
+
+for i in glob.glob('*.mag.*'):
+    os.remove(i)
+
+for i in glob.glob('*.als.*'):
+    os.remove(i)
+
+for i in glob.glob('*.arj.*'):
+    os.remove(i)
+
+for i in glob.glob('*.sub.*'):
+    os.remove(i)
+
+for i in glob.glob('*.pst.*'):
+    os.remove(i)
+
+for i in glob.glob('*psf.*'):
+    os.remove(i)
+
+for i in glob.glob('*.psg.*'):
+    os.remove(i)
+
+for i in glob.glob('*_seqMags.txt'):
+    os.remove(i)
+
+for i in glob.glob('*pix*fits'):
+    os.remove(i)
+
+for i in glob.glob('*_psf_stars.txt'):
+    os.remove(i)
+
+for i in glob.glob('refcoords.txt'):
+    os.remove(i)
+
+for i in glob.glob('imagelist.txt'):
+    os.remove(i)
+
+for i in glob.glob('comlist.txt'):
+    os.remove(i)
+
+for i in glob.glob('shifts.txt'):
+    os.remove(i)
+
+for i in glob.glob('shifted_*'):
+    os.remove(i)
+
 
 parser = argparse.ArgumentParser()
 
@@ -59,6 +122,15 @@ parser.add_argument('--low', dest='z1', default=1, type=float,
                     help='Colour scaling for zoomed images; lower bound is '
                     'this value times the standard deviation of the counts.')
 
+parser.add_argument('--keepsub', dest='keep_sub', default=False, action='store_true',
+                    help='Do not delete residual images during clean-up ')
+
+parser.add_argument('--magmin', dest='magmin', default=21.5, type=float,
+                    help='Faintest sequence stars to return from PS1 query ')
+
+parser.add_argument('--magmax', dest='magmax', default=16.5, type=float,
+                    help='Brightest sequence stars to return from PS1 query ')
+
 
 
 args = parser.parse_args()
@@ -77,6 +149,8 @@ varOrd = args.varOrd
 sigClip = args.sigClip
 z1 = args.z1
 z2 = args.z2
+magmin = args.magmin
+magmax = args.magmax
 
 
 ##################################################
@@ -137,43 +211,6 @@ filtAll = 'ugrizUBVRIJHK'
 ################################
 
 
-for i in glob.glob('*.mag.*'):
-    os.remove(i)
-
-for i in glob.glob('*.als.*'):
-    os.remove(i)
-
-for i in glob.glob('*.arj.*'):
-    os.remove(i)
-
-for i in glob.glob('*.sub.*'):
-    os.remove(i)
-
-for i in glob.glob('*.pst.*'):
-    os.remove(i)
-
-for i in glob.glob('*psf.*'):
-    os.remove(i)
-
-for i in glob.glob('*.psg.*'):
-    os.remove(i)
-
-for i in glob.glob('*_seqMags.txt'):
-    os.remove(i)
-
-for i in glob.glob('*pix*fits'):
-    os.remove(i)
-
-for i in glob.glob('*_psf_stars.txt'):
-    os.remove(i)
-
-for i in glob.glob('*seq_phot1.txt'):
-    os.remove(i)
-
-for i in glob.glob('template0.fits'):
-    os.remove(i)
-
-
 
 outdir = 'PSF_sub_output_'+str(len(glob.glob('PSF_sub_phot_*')))
 
@@ -227,7 +264,11 @@ if len(suggSeq)==0:
 if len(suggSeq)>0:
     seqFile = suggSeq[0]
 else:
-    sys.exit('Error: no sequence stars (*_seq.txt) found')
+    print 'No sequence star data found locally...'
+    queryPS1(RAdec[0],RAdec[1],magmin,magmax)
+    seqFile = 'PS1_seq.txt'
+    # except:
+    #     sys.exit('Error: no sequence stars (*_seq.txt) found')
 
 print '\n####################\n\nSequence star magnitudes found: '+seqFile
 
