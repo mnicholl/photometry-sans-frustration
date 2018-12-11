@@ -51,10 +51,10 @@ from mpl_toolkits.mplot3d import Axes3D
 import argparse
 from matplotlib.patches import Circle
 import requests
-try:
-    from queryPS1mast import queryPS1
-except:
-    print 'Warning: PS1 query package not found, must have sequence star data locally\n'
+# try:
+#     from queryPS1 import PS1catalog
+# except:
+#     print 'Warning: PS1 query package not found, must have sequence star data locally\n'
 
 
 ####### Parameters to vary if things aren't going well: #####################
@@ -241,7 +241,7 @@ outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tcomments')
 
 
 
-plt.figure(1,(15,8))
+plt.figure(1,(14,7))
 
 plt.ion()
 

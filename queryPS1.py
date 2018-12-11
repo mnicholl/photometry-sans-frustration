@@ -1,13 +1,18 @@
+#!/usr/bin/env python
+
 '''
     Get sequence star data from PS1, for use with psf.py photometry package
+    Requires requests package
 '''
 
 import numpy as np
 import requests
 import glob
 import sys
+import os
 
-def queryPS1(ra,dec,magmin,magmax):
+
+def PS1catalog(ra,dec,magmin,magmax):
 
     queryurl = 'https://archive.stsci.edu/panstarrs/search.php?'
     queryurl += 'RA='+str(ra)
@@ -67,3 +72,41 @@ def queryPS1(ra,dec,magmin,magmax):
 
     else:
         sys.exit('Field not in PS1! Exiting')
+
+
+
+def PS1cutouts(ra,dec,filt):
+
+    print '\nSearching for PS1 images of field...\n'
+
+    ps1_url = 'http://ps1images.stsci.edu/cgi-bin/ps1filenames.py?'
+
+    ps1_url += '&ra='+str(ra)
+    ps1_url += '&dec='+str(dec)
+    ps1_url += '&filters='+filt
+
+    ps1_im = requests.get(ps1_url)
+
+    try:
+        image_name = ps1_im.text.split()[16]
+
+        print 'Image found: ' + image_name + '\n'
+
+        cutout_url = 'http://ps1images.stsci.edu/cgi-bin/fitscut.cgi?&filetypes=stack&size=2500'
+
+        cutout_url += '&ra='+str(ra)
+        cutout_url += '&dec='+str(dec)
+        cutout_url += '&filters='+filt
+        cutout_url += '&format=fits'
+        cutout_url += '&red='+image_name
+
+        dest_file = filt + '_template.fits'
+
+        cmd = 'wget -O %s "%s"' % (dest_file, cutout_url)
+
+        os.system(cmd)
+
+        print 'Template downloaded as ' + dest_file + '\n'
+
+    except:
+        print '\nPS1 template search failed!\n'

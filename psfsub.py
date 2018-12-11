@@ -18,9 +18,14 @@ import argparse
 from matplotlib.patches import Circle
 import requests
 try:
-    from queryPS1mast import queryPS1
+    from queryPS1 import PS1catalog
 except:
-    print 'Warning: PS1 query package not found, must have sequence star data locally\n'
+    print 'Warning: PS1 MAST query package not found, must have sequence star data locally\n'
+try:
+    from queryPS1 import PS1cutouts
+except:
+    print 'Warning: PS1 image query package not found, must have template images locally\n'
+
 
 ####### Parameters to vary if things aren't going well: #####################
 #
@@ -227,7 +232,7 @@ outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tcomments')
 
 
 
-fig1 = plt.figure(1,(12,6))
+fig1 = plt.figure(1,(14,7))
 
 plt.clf()
 
@@ -252,6 +257,9 @@ else:
 
 print '\n####################\n\nSN coordinates found: '+snFile
 
+RAdec = np.genfromtxt(snFile)
+
+
 # Get star catalog
 suggSeq = glob.glob('*seq.txt')
 
@@ -265,7 +273,7 @@ if len(suggSeq)>0:
     seqFile = suggSeq[0]
 else:
     print 'No sequence star data found locally...'
-    queryPS1(RAdec[0],RAdec[1],magmin,magmax)
+    PS1catalog(RAdec[0],RAdec[1],magmin,magmax)
     seqFile = 'PS1_seq.txt'
     # except:
     #     sys.exit('Error: no sequence stars (*_seq.txt) found')
@@ -334,39 +342,57 @@ if filtername1 not in filtAll:
     filtername1 = raw_input('\n> Please enter filter ('+filtAll+') ')
 
 
+
 # template
-print '\nFile: ' + template
-try:
-    filtername2 = pyfits.getval(template,'FILTER')
-except:
+
+
+######## DOWNLOAD TEMPLATE FROM PS1 ##########
+
+if template == 'ps1':
     try:
-        filtername2 = pyfits.getval(template,'FILTER1')
-        if filtername2 == ('air' or 'none' or 'clear'):
-            filtername2 = pyfits.getval(template,'FILTER2')
-        if filtername2 == ('air' or 'none' or 'clear'):
-            filtername2 = pyfits.getval(template,'FILTER3')
+        PS1cutouts(RAdec[0],RAdec[1],filtername1)
+        template = filtername1 + '_template.fits'
+        filtername2 = filtername1
+    except:
+        sys.exit('Error: could not match template from PS1')
+
+
+##############################################
+
+else:
+    print '\nFile: ' + template
+    try:
+        filtername2 = pyfits.getval(template,'FILTER')
     except:
         try:
-            filtername2 = pyfits.getval(template,'NCFLTNM2')
+            filtername2 = pyfits.getval(template,'FILTER1')
+            if filtername2 == ('air' or 'none' or 'clear'):
+                filtername2 = pyfits.getval(template,'FILTER2')
+            if filtername2 == ('air' or 'none' or 'clear'):
+                filtername2 = pyfits.getval(template,'FILTER3')
         except:
             try:
-                filtername2 = pyfits.getval(template,'HIERARCH FPA.FILTER')
+                filtername2 = pyfits.getval(template,'NCFLTNM2')
             except:
-                filtername2 = 'none'
-print 'Filter found in header: ' + filtername2
-if filtername2=='none':
-    filtername2 = raw_input('\n> Please enter filter ('+filtAll+') ')
+                try:
+                    filtername2 = pyfits.getval(template,'HIERARCH FPA.FILTER')
+                except:
+                    filtername2 = 'none'
+    print 'Filter found in header: ' + filtername2
+    if filtername2=='none':
+        filtername2 = raw_input('\n> Please enter filter ('+filtAll+') ')
 
-for j in filtSyn:
-    if filtername2 in filtSyn[j]:
-        filtername2 = j
-        print 'Standard filter = ' + filtername2
+    for j in filtSyn:
+        if filtername2 in filtSyn[j]:
+            filtername2 = j
+            print 'Standard filter = ' + filtername2
 
-if filtername2 not in filtAll:
-    filtername2 = raw_input('\n> Please enter filter ('+filtAll+') ')
+    if filtername2 not in filtAll:
+        filtername2 = raw_input('\n> Please enter filter ('+filtAll+') ')
 
-if filtername2!=filtername1:
-    message = raw_input('\n!!!Warning: filters do not appear to match!!!')
+    if filtername2!=filtername1:
+        message = raw_input('\n!!!Warning: filters do not appear to match!!!')
+
 
 
 
@@ -688,7 +714,7 @@ except:
     iraf.hedit(image=template,fields='PC002002',add='no',addonly='no',
                 delete='yes',verify='no',update='yes')
 
-fig2 = plt.figure(2,(12,6))
+fig2 = plt.figure(2,(14,7))
 
 plt.clf()
 
@@ -988,7 +1014,7 @@ iraf.imreplace(image=image.split('.fits')[0]+'_ped.fits',
                 value=np.median(imdata)+0.001, upper=0.1)
 
 
-fig3 = plt.figure(3,(12,6))
+fig3 = plt.figure(3,(14,7))
 
 # NEED TO MEASURE PSF ON TRANSFORMED IMAGE!
 
@@ -1250,7 +1276,7 @@ else:
     psfModel = image+'.psf.'+str(j)+'.fits'
 
 
-fig4 = plt.figure(4,(12,6))
+fig4 = plt.figure(4,(14,7))
 
 ax1 = plt.subplot(121)
 

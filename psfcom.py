@@ -51,7 +51,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import argparse
 import requests
 try:
-    from queryPS1mast import queryPS1
+    from queryPS1 import PS1catalog
 except:
     print 'Warning: PS1 query package not found, must have sequence star data locally\n'
 
@@ -248,7 +248,7 @@ outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tcomments')
 
 
 
-plt.figure(1,(15,8))
+plt.figure(1,(14,7))
 
 plt.ion()
 
@@ -276,7 +276,7 @@ else:
 
 print '\n####################\n\nSN coordinates found: '+snFile
 
-#RAdec = np.genfromtxt(snFile)
+RAdec = np.genfromtxt(snFile)
 
 
 
@@ -292,7 +292,7 @@ if len(suggSeq)>0:
     seqFile = suggSeq[0]
 else:
     print 'No sequence star data found locally...'
-    queryPS1(RAdec[0],RAdec[1],magmin,magmax)
+    PS1catalog(RAdec[0],RAdec[1],magmin,magmax)
     seqFile = 'PS1_seq.txt'
     # except:
     #     sys.exit('Error: no sequence stars (*_seq.txt) found')
