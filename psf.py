@@ -113,6 +113,7 @@ aprad = args.aprad
 skyrad = args.skyrad
 bkgbox = args.bkgbox
 sigClip = args.sigClip
+quiet = args.quiet
 
 ims = [i for i in args.file_to_reduce]
 
@@ -258,11 +259,11 @@ print('#################################################\n#                     
 
 
 # A place to save output files
-outdir = 'PSF_output_'+str(len(glob.glob('PSF_phot_*')))
+outdir = 'PSF_output'
 if not os.path.exists(outdir): os.makedirs(outdir)
 
 # A file to write final magnitudes
-outFile = open('PSF_phot_'+str(len(glob.glob('PSF_phot_*')))+'.txt','w')
+outFile = open(os.path.join(outdir,'PSF_phot_'+str(len(glob.glob(os.path.join(outdir,'PSF_phot_*'))))+'.txt'),'w')
 outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tZP\terr\tcomments')
 
 
@@ -374,8 +375,6 @@ for image in ims:
 
     if filtername not in filtAll:
         filtername = input('Please enter filter ('+filtAll+') ')
-
-
 
 
     try:
@@ -577,16 +576,16 @@ for image in ims:
 
         plt.draw()
 
-
-        happy = input('\nProceed with this PSF? [y] ')
-        if not happy: happy = 'y'
-        if happy != 'y':
-            aprad = int(input('Try new aperture radius: [' +str(aprad)+']'))
-
+        if not quiet:
+            happy = input('\nProceed with this PSF? [y] ')
+            if not happy: happy = 'y'
+            if happy != 'y':
+                aprad = int(input('Try new aperture radius: [' +str(aprad)+']'))
+        else:
+            happy = 'y'
 
     psfcoordTable = astropy.table.Table()
 
-    # psfcoordTable['id'] = np.arange(len(co))
     psfcoordTable['x_0'] = co[:,0]
     psfcoordTable['y_0'] = co[:,1]
     psfcoordTable['flux_0'] = photTab['aper_sum_sub']
@@ -609,7 +608,7 @@ for image in ims:
                 vmin=visualization.ZScaleInterval().get_limits(data)[0],
                 vmax=visualization.ZScaleInterval().get_limits(data)[1])
 
-    goodStars = (psfphotTab['flux_fit']/psfphotTab['flux_0']>0.95)&(psfphotTab['flux_fit']/psfphotTab['flux_0']<1.05)
+    goodStars = (psfphotTab['flux_fit']/psfphotTab['flux_0']>0.85)&(psfphotTab['flux_fit']/psfphotTab['flux_0']<1.15)
 
     ax1.errorbar(co[:,0][~goodStars],co[:,1][~goodStars],fmt='x',mfc='none',
                 markeredgewidth=2, color='C1',
@@ -692,13 +691,9 @@ for image in ims:
     plt.draw()
 
 
-
-    # aperture
-
+    # apertures
     photap = photutils.CircularAperture(SNco, r=aprad)
-
     skyap = photutils.CircularAnnulus(SNco, r_in=aprad, r_out=aprad+skyrad)
-
     skymask = skyap.to_mask(method='center')
 
     # Get median sky in annulus around transient
@@ -713,17 +708,11 @@ for image in ims:
     SNphotTab['aper_sum_sub'] = SNphotTab['aperture_sum'] - bkg_median * photap.area()
 
 
-
+    # PSF phot on transient
     SNcoordTable = astropy.table.Table()
     SNcoordTable['x_0'] = SNco[0]
     SNcoordTable['y_0'] = SNco[1]
     SNcoordTable['flux_0'] = SNphotTab['aper_sum_sub']
-
-
-    # psfphot = photutils.psf.BasicPSFPhotometry(group_maker=grouper,
-    #                 bkg_estimator=photutils.background.MMMBackground(),
-    #                 psf_model=epsf, fitshape=fitrad,
-    #                 finder=None, aperture_radius=aprad)
 
     SNpsfphotTab = psfphot.do_photometry(data, init_guesses=SNcoordTable)
 
@@ -801,8 +790,9 @@ for image in ims:
     print('> PSF mag = '+'%.2f +/- %.2f' %(calMagPsf,errMagPsf))
     print('> Aperture mag = '+'%.2f +/- %.2f' %(calMagAp,errMagAp))
 
-
-    comment = input('\n> Add comment to output file: ')
+    comment = ''
+    if not quiet:
+        comment = input('\n> Add comment to output file: ')
 
     if comment1:
         comment += (' // '+comment1)
