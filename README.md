@@ -10,6 +10,8 @@ measure transient photometry on image. Can specify multiple images with list or 
     psf.py
     psf.py -i image.fits [--options]
 
+The other scripts below need to be re-written in Python 3 as some dependencies are no longer maintained. Use them at your own risk!
+
 psfcom:
 stack multiple images and then do photometry
 

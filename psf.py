@@ -1,18 +1,17 @@
 #!/usr/bin/env python
 
-version = '0.1'
+version = '0.2'
 
 '''
     PSF: PHOTOMETRY SANS FRUSTRATION
 
-    Written by Matt Nicholl, 2015
+    Written by Matt Nicholl, 2015-2019
 
     Requirements:
 
-    Needs pyraf, pyfits, numpy, and matplotlib (tested with Ureka and
-    Anaconda python installations)
+    Needs astropy, numpy, and matplotlib. Also requests if querying PanSTARRS.
 
-    Currently only available in python 2 for iraf compatibility
+    Previously in IRAF, completely re-written for Python 3 using photutils
 
     Run in directory with image files in FITS format.
 
@@ -25,12 +24,15 @@ version = '0.1'
     RA_value  DEC_value
 
     File with local sequence star coordinates (J2000) and magnitudes
-    must exist in same directory or parent directory, and should be
+    may exist in same directory or parent directory, and should be
     named *_seq.txt
     Format:
     RA_value DEC_value  MAGBAND1_value    MAGBAND2_value    ...
 
-    Given this list of field star magnitudes and coordinates, PSF.py will
+    If sequence star file does not exist, code will create one from PS1 archive.
+    But note that PS1 only contains grizy magnitudes!
+
+    Given this list of field star magnitudes and coordinates, psf.py will
     compute the zeropoint of the image, construct a point spread function
     from these stars, fit this to the target of interest, show the resulting
     subtraction, and return the apparent magnitude from both PSF and aperture
@@ -38,45 +40,24 @@ version = '0.1'
 
     Run with python psf.py <flags> (see help message with psf.py --help)
 
-    Outputs:
-
-    PSF_phot_X.txt (where X is an integer that increases every time code is run,
-        to avoid overwriting results)
-        This is the primary output of PSF
-        Format of text file is:
+    Outputs a text file PSF_phot_X.txt (where X is an integer that increases
+    every time code is run, to avoid overwriting previous results)
+    Format of text file is:
         image  filter  mjd  PSFmag  err  APmag  err  comments
         - Row exists for each input image used in run
         - PSFmag is from PSF fitting, APmag is from simple aperture photometry
         using aperture size specified with --ap (default 10 pixel radius)
+        - ZP is measured from sequence stars
         - comment allows user to specify if e.g. PSF fit looked unreliable
-    PSF_output_X/ (where X is same integer as for text file) has additional
-        info useful for double-checking results
-        For each input file, directory contains:
-        - IMAGENAME_psf_stars.txt : list of stars used to build PSF
-            Number corresponds to position in input file (_seq.txt)
-        - IMAGENAME_seqMags.txt : instrumental magnitudes of sequence stars
-        - zeropoints.txt : instrumental zeropoint for each input image
-        - zp_list.txt : zeropoints inferred from all sequence stars
-            (only for last image processed)
-        - IMAGENAME_SN_ap.txt : aperture instrumental mag of target
-        - IMAGENAME_SN_dao.txt : Daophot PSF-fitting instrumental mag of target
-        - IMAGENAME_psf.fits : Postage stamp image of PSF from iraf task seepsf
-        - IMAGENAME.psf.?.fits : Full results of PSF fits. May be more than
-            one per image if multiple iterations of PSF fitting were needed
-        - IMAGENAME.mag.? : Iraf phot logs for sequence stars and for target
 
-    NEED TO FULLY DOCUMENT
+    NEED TO FULLY DOCUMENT...
 
     '''
 
 import numpy as np
 import glob
-from pyraf import iraf
-from iraf import daophot
-try:
-    from astropy.io import fits as pyfits
-except ImportError:
-    import pyfits
+import astropy
+import photutils
 import sys
 import shutil
 import os
@@ -86,69 +67,10 @@ from mpl_toolkits.mplot3d import Axes3D
 import argparse
 from matplotlib.patches import Circle
 import requests
-try:
-    from queryPS1 import PS1catalog
-except:
-    print 'Warning: PS1 query package not found, must have sequence star data locally\n'
-
-####### Parameters to vary if things aren't going well: #####################
-#
-# aprad = 10      # aperture radius for phot
-# nPSF = 10              # number of PSF stars to try
-# recen_rad_stars = 10     # recentering radius: increase if centroid not found; decrease if wrong centroid found!
-# recen_rad_sn = 5
-# varOrd = 0             # PSF model order: -1 = pure analytic, 2 = high-order empirical corrections, 0/1 intermediate
-# sigClip = 1         # Reject sequence stars if calculated ZP differs by this may sigma from the mean
-#
-#############
+from astropy import visualization
 
 
-
-for i in glob.glob('*.mag.*'):
-    os.remove(i)
-
-for i in glob.glob('*.als.*'):
-    os.remove(i)
-
-for i in glob.glob('*.arj.*'):
-    os.remove(i)
-
-for i in glob.glob('*.sub.*'):
-    os.remove(i)
-
-for i in glob.glob('*.pst.*'):
-    os.remove(i)
-
-for i in glob.glob('*psf.*'):
-    os.remove(i)
-
-for i in glob.glob('*.psg.*'):
-    os.remove(i)
-
-for i in glob.glob('*_seqMags.txt'):
-    os.remove(i)
-
-for i in glob.glob('*pix*fits'):
-    os.remove(i)
-
-for i in glob.glob('*_psf_stars.txt'):
-    os.remove(i)
-
-for i in glob.glob('refcoords.txt'):
-    os.remove(i)
-
-for i in glob.glob('imagelist.txt'):
-    os.remove(i)
-
-for i in glob.glob('comlist.txt'):
-    os.remove(i)
-
-for i in glob.glob('shifts.txt'):
-    os.remove(i)
-
-for i in glob.glob('shifted_*'):
-    os.remove(i)
-
+# Optional flags:
 
 parser = argparse.ArgumentParser()
 
@@ -156,95 +78,157 @@ parser.add_argument('--ims','-i', dest='file_to_reduce', default='', nargs='+',
                     help='List of files to reduce. Accepts wildcards or '
                     'space-delimited list.')
 
-parser.add_argument('--ap', dest='aprad', default=10, type=int,
-                    help='Radius for aperture/PSF phot.')
-
-parser.add_argument('--sky', dest='skyrad', default=10, type=int,
-                    help='Width of annulus for sky background.')
-
-parser.add_argument('--npsf', dest='nPSF', default=10, type=int,
-                    help='Number of PSF stars.')
-
-parser.add_argument('--re', dest='recen_rad_stars', default=10, type=int,
-                    help='Radius for recentering on stars.')
-
-parser.add_argument('--resn', dest='recen_rad_sn', default=5, type=int,
-                    help='Radius for recentering on SN.')
-
-parser.add_argument('--var', dest='varOrd', default=0, type=int,
-                    help='Order for PSF model.')
-
-parser.add_argument('--sig', dest='sigClip', default=1, type=int,
-                    help='Sigma clipping for rejecting sequence stars.')
-
-parser.add_argument('--high', dest='z2', default=1, type=float,
-                    help='Colour scaling for zoomed images; upper bound is '
-                    'this value times the standard deviation of the counts.')
-
-parser.add_argument('--low', dest='z1', default=1, type=float,
-                    help='Colour scaling for zoomed images; lower bound is '
-                    'this value times the standard deviation of the counts.')
-
-parser.add_argument('--keepsub', dest='keep_sub', default=False, action='store_true',
-                    help='Do not delete residual images during clean-up ')
-
 parser.add_argument('--magmin', dest='magmin', default=21.5, type=float,
                     help='Faintest sequence stars to return from PS1 query ')
 
 parser.add_argument('--magmax', dest='magmax', default=16.5, type=float,
                     help='Brightest sequence stars to return from PS1 query ')
 
+parser.add_argument('--shifts', dest='shifts', default=False, action='store_true',
+                    help='Apply manual shifts if WCS is a bit off ')
+
+parser.add_argument('--ap', dest='aprad', default=15, type=int,
+                    help='Radius for aperture/PSF phot.')
+
+parser.add_argument('--sky', dest='skyrad', default=5, type=int,
+                    help='Width of annulus for sky background.')
+
+parser.add_argument('--box', dest='bkgbox', default=500, type=int,
+                    help='Size of stamps for background fit.')
+
+parser.add_argument('--zpsig', dest='sigClip', default=3, type=int,
+                    help='Sigma clipping for rejecting sequence stars.')
+
+parser.add_argument('--quiet', dest='quiet', default=False, action='store_true',
+                    help='Run with no user prompts')
+
+
 
 args = parser.parse_args()
 
-
-aprad = args.aprad
-skyrad = args.skyrad
-nPSF = args.nPSF
-recen_rad_stars = args.recen_rad_stars
-recen_rad_sn = args.recen_rad_sn
-varOrd = args.varOrd
-sigClip = args.sigClip
-z1 = args.z1
-z2 = args.z2
 magmin = args.magmin
 magmax = args.magmax
+shifts = args.shifts
+aprad = args.aprad
+skyrad = args.skyrad
+bkgbox = args.bkgbox
+sigClip = args.sigClip
 
 ims = [i for i in args.file_to_reduce]
 
-
+# If no images provided, run on all images in directory
 if len(ims) == 0:
     ims = glob.glob('*.fits')
 
 
 ##################################################
 
-iraf.centerpars.calgo='centroid'
-iraf.centerpars.cmaxiter=50
-iraf.fitskypars.salgo='centroid'
-iraf.fitskypars.annulus=aprad
-iraf.fitskypars.dannulus=skyrad
-iraf.photpars.apertures=aprad
-iraf.photpars.zmag=0
-iraf.datapars.sigma='INDEF'
-iraf.datapars.datamin='INDEF'
-iraf.datapars.datamax='INDEF'
-
-daophot.daopars.function='gauss'
-daophot.daopars.psfrad=aprad
-daophot.daopars.fitrad=10
-daophot.daopars.matchrad=3
-daophot.daopars.sannu=aprad
-daophot.daopars.wsann=skyrad
-daophot.daopars.varorder=varOrd
-daophot.datapars.datamin='INDEF'
-daophot.datapars.datamax='INDEF'
-daophot.daopars.recenter='yes'
-daophot.daopars.groupsky='yes'
-daophot.daopars.fitsky='yes'
 
 
-##################################################
+##### FUNCTIONS TO QUERY PANSTARRS #######
+
+def PS1catalog(ra,dec,magmin,magmax):
+
+    queryurl = 'https://archive.stsci.edu/panstarrs/search.php?'
+    queryurl += 'RA='+str(ra)
+    queryurl += '&DEC='+str(dec)
+    queryurl += '&SR=0.083&selectedColumnsCsv=ndetections,raMean,decMean,'
+    queryurl += 'gMeanPSFMag,rMeanPSFMag,iMeanPSFMag,zMeanPSFMag,yMeanPSFMag,iMeanKronMag'
+    queryurl += '&ordercolumn1=ndetections&descending1=on&max_records=200'
+
+    print('\nQuerying PS1 for reference stars via MAST...\n')
+
+    query = requests.get(queryurl)
+
+    results = query.text
+
+    entries = results.split('DATA')[2][11:][:-19].split('</TD>\n</TR>\n<TR>\n<TD>')
+
+    data = []
+
+    for i in entries:
+        data.append(np.array(i.split('</TD><TD>')).T)
+
+    if len(data) > 1:
+
+        data = np.array(data).astype(float)
+
+        # Get rid of n_det column
+        data = data[:,1:][data[:,0]>3]
+
+        # Get rid of non-detections:
+        data = data[data[:,2]>-999]
+        data = data[data[:,3]>-999]
+        data = data[data[:,4]>-999]
+        data = data[data[:,5]>-999]
+        data = data[data[:,6]>-999]
+
+        # Get rid of very faint stars
+        data = data[data[:,2]<magmin]
+        data = data[data[:,3]<magmin]
+        data = data[data[:,4]<magmin]
+        data = data[data[:,5]<magmin]
+        data = data[data[:,6]<magmin]
+
+        # Get rid of stars likely to saturate
+        data = data[data[:,2]>magmax]
+        data = data[data[:,3]>magmax]
+        data = data[data[:,4]>magmax]
+        data = data[data[:,5]>magmax]
+        data = data[data[:,6]>magmax]
+
+
+        # Star-galaxy separation
+        data = data[:,:-1][data[:,4]-data[:,-1]<0.05]
+
+        np.savetxt('PS1_seq.txt',data,fmt='%.8f\t%.8f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f',header='Ra\tDec\tg\tr\ti\tz\ty\n',comments='')
+
+        print('Success! Sequence star file created: PS1_seq.txt')
+
+    else:
+        sys.exit('Field not in PS1! Exiting')
+
+
+
+def PS1cutouts(ra,dec,filt):
+
+    print('\nSearching for PS1 images of field...\n')
+
+    ps1_url = 'http://ps1images.stsci.edu/cgi-bin/ps1filenames.py?'
+
+    ps1_url += '&ra='+str(ra)
+    ps1_url += '&dec='+str(dec)
+    ps1_url += '&filters='+filt
+
+    ps1_im = requests.get(ps1_url)
+
+    try:
+        image_name = ps1_im.text.split()[16]
+
+        print('Image found: ' + image_name + '\n')
+
+        cutout_url = 'http://ps1images.stsci.edu/cgi-bin/fitscut.cgi?&filetypes=stack&size=2500'
+
+        cutout_url += '&ra='+str(ra)
+        cutout_url += '&dec='+str(dec)
+        cutout_url += '&filters='+filt
+        cutout_url += '&format=fits'
+        cutout_url += '&red='+image_name
+
+        dest_file = filt + '_template.fits'
+
+        cmd = 'wget -O %s "%s"' % (dest_file, cutout_url)
+
+        os.system(cmd)
+
+        print('Template downloaded as ' + dest_file + '\n')
+
+    except:
+        print('\nPS1 template search failed!\n')
+
+
+##################################
+
 
 
 
@@ -273,25 +257,20 @@ filtAll = 'ugrizUBVRIJHK'
 print('#################################################\n#                                               #\n#  Welcome to PSF: Photometry Sans Frustration  #\n#                    (V'+version+')                     #\n#        Written by Matt Nicholl (2015)         #\n#                                               #\n#################################################')
 
 
-
+# A place to save output files
 outdir = 'PSF_output_'+str(len(glob.glob('PSF_phot_*')))
-
 if not os.path.exists(outdir): os.makedirs(outdir)
 
-
+# A file to write final magnitudes
 outFile = open('PSF_phot_'+str(len(glob.glob('PSF_phot_*')))+'.txt','w')
-
-ZPfile = open(os.path.join(outdir,'zeropoints.txt'),'w')
-
-
-outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tcomments')
+outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tZP\terr\tcomments')
 
 
+
+# Prepare to plot images and PSFs
 
 plt.figure(1,(14,7))
-
 plt.ion()
-
 plt.show()
 
 
@@ -300,25 +279,27 @@ plt.show()
 # Part one: get sequence stars
 ################################
 
+# Search for SN coordinates file (1 line: RA Dec) in this directory and parents
 
 suggSn = glob.glob('*coords.txt')
-
 if len(suggSn)==0:
     suggSn = glob.glob('../*coords.txt')
-
 if len(suggSn)==0:
     suggSn = glob.glob('../../*coords.txt')
+
+# Needs SN coords to run!
 
 if len(suggSn)>0:
     snFile = suggSn[0]
 else:
     sys.exit('Error: no SN coordinates (*_coords.txt) found')
 
-print '\n####################\n\nSN coordinates found: '+snFile
+print('\n####################\n\nSN coordinates found: '+snFile)
 
 RAdec = np.genfromtxt(snFile)
 
 
+# Search for sequence star file (RA, dec, mags)
 
 suggSeq = glob.glob('*seq.txt')
 
@@ -331,20 +312,18 @@ if len(suggSeq)==0:
 if len(suggSeq)>0:
     seqFile = suggSeq[0]
 else:
-    print 'No sequence star data found locally...'
+    print('No sequence star data found locally...')
     PS1catalog(RAdec[0],RAdec[1],magmin,magmax)
     seqFile = 'PS1_seq.txt'
     # except:
     #     sys.exit('Error: no sequence stars (*_seq.txt) found')
 
-print '\n####################\n\nSequence star magnitudes found: '+seqFile
+print('\n####################\n\nSequence star magnitudes found: '+seqFile)
 
 
 seqDat = np.genfromtxt(seqFile,skip_header=1)
 
 seqHead = np.genfromtxt(seqFile,skip_footer=len(seqDat),dtype=str)
-
-np.savetxt('coords',seqDat[:,:2],fmt='%e',delimiter='  ')
 
 seqMags = {}
 
@@ -362,9 +341,6 @@ for image in ims:
 
     comment1 = ''
 
-    iraf.centerpars.cbox=recen_rad_stars
-
-
 
 ################################
 # Part two: image header info
@@ -372,50 +348,49 @@ for image in ims:
 
 
 
-    print '\nFile: ' + image
+    print('\nFile: ' + image)
     try:
-        filtername = pyfits.getval(image,'FILTER')
+        filtername = astropy.io.fits.getval(image,'FILTER')
     except:
         try:
-            filtername = pyfits.getval(image,'FILTER1')
+            filtername = astropy.io.fits.getval(image,'FILTER1')
             if filtername == ('air' or 'none' or 'clear'):
-                filtername = pyfits.getval(image,'FILTER2')
+                filtername = astropy.io.fits.getval(image,'FILTER2')
             if filtername == ('air' or 'none' or 'clear'):
-                filtername = pyfits.getval(image,'FILTER3')
+                filtername = astropy.io.fits.getval(image,'FILTER3')
         except:
             try:
-                filtername = pyfits.getval(image,'NCFLTNM2')
+                filtername = astropy.io.fits.getval(image,'NCFLTNM2')
             except:
                 filtername = 'none'
-    print 'Filter found in header: ' + filtername
+    print('Filter found in header: ' + filtername)
     if filtername=='none':
-        filtername = raw_input('Please enter filter ('+filtAll+') ')
+        filtername = input('Please enter filter ('+filtAll+') ')
 
     for j in filtSyn:
         if filtername in filtSyn[j]:
             filtername = j
-            print 'Standard filter = ' + filtername
+            print('Calibrating to filter: ' + filtername)
 
     if filtername not in filtAll:
-        filtername = raw_input('Please enter filter ('+filtAll+') ')
+        filtername = input('Please enter filter ('+filtAll+') ')
 
 
 
 
     try:
-        mjd = pyfits.getval(image,'MJD')
+        mjd = astropy.io.fits.getval(image,'MJD')
     except:
         try:
-            mjd = pyfits.getval(image,'MJD-OBS')
+            mjd = astropy.io.fits.getval(image,'MJD-OBS')
         except:
             try:
-                jd = pyfits.getval(image,'JD')
+                jd = astropy.io.fits.getval(image,'JD')
                 mjd = jd - 2400000
             except:
                 mjd = 99999
 
         mjd = float(mjd)
-
 
 
 #################################
@@ -424,198 +399,167 @@ for image in ims:
 
 
 
-    print '\n#########\n'+filtername+'-band\n#########\n'
+    print('\n#########\n'+filtername+'-band\n#########\n')
 
 
+    im = astropy.io.fits.open(image)
+
+    try:
+        im[0].verify('fix')
+
+        data = im[0].data
+        header = im[0].header
+
+    except:
+        im[1].verify('fix')
+
+        data = im[1].data
+        header = im[1].header
+
+
+    # background subtraction:
+
+    bkg = photutils.background.Background2D(data,box_size=bkgbox)
+
+    data -= bkg.background
+
+########## plot data
 
     plt.clf()
 
     plt.subplots_adjust(left=0.05,right=0.99,top=0.99,bottom=-0.05)
 
-########## plot data
 
     ax1 = plt.subplot2grid((2,4),(0,0),colspan=2,rowspan=2)
 
-    try:
-        im = pyfits.open(image)
 
-        im[0].verify('fix')
-
-        data = im[0].data
-
-        header = im[0].header
-
-        ax1.imshow(data, origin='lower',cmap='gray',
-                            vmin=np.median(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])-
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])*0.5,
-                            vmax=np.median(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])+
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2]))
-
-    except:
-        im = pyfits.open(image)
-
-        im[1].verify('fix')
-
-        data = im[1].data
-
-        header = im[1].header
-
-        ax1.imshow(data, origin='lower',cmap='gray',
-                            vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])-
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])*0.5,
-                            vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])+
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2]))
-
+    ax1.imshow(data, origin='lower',cmap='gray',
+                vmin=visualization.ZScaleInterval().get_limits(data)[0],
+                vmax=visualization.ZScaleInterval().get_limits(data)[1])
 
     ax1.set_title(image)
 
-
     ax1.set_xlim(0,len(data))
-
     ax1.set_ylim(0,len(data))
 
     ax1.get_yaxis().set_visible(False)
     ax1.get_xaxis().set_visible(False)
 
-    plt.draw()
+    co = astropy.wcs.WCS(header=header).all_world2pix(seqDat[:,0],seqDat[:,1],1)
+    co = np.array(list(zip(co[0],co[1])))
 
-    iraf.wcsctran(input='coords',output=image+'_pix.fits',image=image,
-                    inwcs='world',outwcs='logical')
+    # Remove any stars falling outside the image
+    inframe = (co[:,0]>0)&(co[:,0]<len(data[0])-1)&(co[:,1]>0)&(co[:,1]<len(data)-1)
+    co = co[inframe]
 
-    co = np.genfromtxt(image+'_pix.fits')
+    orig_co = co.copy()
 
-    ax1.errorbar(co[:,0],co[:,1],fmt='o',mfc='none',markeredgewidth=3,
-                    markersize=20,label='Sequence stars')
-
-
-    for j in range(len(co)):
-       ax1.text(co[j,0]+20,co[j,1]-20,str(j+1),color='cornflowerblue')
-
-
-
-    iraf.wcsctran(input=snFile,output=image+'_SNpix.fits',image=image,
-                    inwcs='world',outwcs='logical')
-
-    SNco = np.genfromtxt(image+'_SNpix.fits')
-
-
-    ax1.errorbar(SNco[0],SNco[1],fmt='o',markeredgecolor='r',mfc='none',
-                    markeredgewidth=5,markersize=25)
-
-    ax1.text(SNco[0]+30,SNco[1]+30,'SN',color='r')
-
-
-
-########### Centering
-
-    # Manual shifts:
-    x_sh = raw_input('\n> Add approx pixel shift in x? ['+str(x_sh_1)+']  ')
-    if not x_sh: x_sh = x_sh_1
-    x_sh = int(x_sh)
-    x_sh_1 = x_sh
-
-    y_sh = raw_input('\n> Add approx pixel shift in y? ['+str(y_sh_1)+']  ')
-    if not y_sh: y_sh = y_sh_1
-    y_sh = int(y_sh)
-    y_sh_1 = y_sh
-
-    shutil.copy(image+'_pix.fits',image+'_orig_pix.fits')
-
-    pix_coords = np.genfromtxt(image+'_pix.fits')
-    pix_coords[:,0] += x_sh
-    pix_coords[:,1] += y_sh
-
-    np.savetxt(image+'_pix.fits',pix_coords)
-
-    # recenter on seq stars and generate star list for daophot:
-    iraf.phot(image=image,coords=image+'_pix.fits',output='default',
-                    interactive='no',verify='no',wcsin='logical',verbose='yes',
-                    Stdout='phot_out.txt')
-
-
-    cent = np.genfromtxt('phot_out.txt')
-
-    ax1.errorbar(cent[:,1],cent[:,2],fmt='s',mfc='none',markeredgecolor='b',
-                    markersize=10,markeredgewidth=1.5,label='Recentered',
+    # Mark sequence stars
+    ax1.errorbar(co[:,0],co[:,1],fmt='s',mfc='none',markeredgecolor='C0',
+                    markersize=8,markeredgewidth=1.5,
                     zorder=6)
 
 
-    orig_co = np.genfromtxt(image+'_orig_pix.fits')
+    SNco = astropy.wcs.WCS(header=header).all_world2pix(RAdec[0],RAdec[1],0)
 
-    del_x = np.mean(cent[:,1]-orig_co[:,0])
-    del_y = np.mean(cent[:,2]-orig_co[:,1])
-
-
-########### Build PSF
-
-    daophot.pstselect(image=image,photfile='default',pstfile='default',
-                        maxnpsf=nPSF,verify='no')
-
-    ax2 = plt.subplot2grid((2,4),(0,2))
+    ax1.errorbar(SNco[0],SNco[1],fmt='o',markeredgecolor='r',mfc='none',
+                    markeredgewidth=3,markersize=20)
 
 
+    plt.draw()
+
+
+
+    # Manual shifts:
+    if shifts:
+        x_sh = input('\n> Add approx pixel shift in x? ['+str(x_sh_1)+']  ')
+        if not x_sh: x_sh = x_sh_1
+        x_sh = int(x_sh)
+        x_sh_1 = x_sh
+
+        y_sh = input('\n> Add approx pixel shift in y? ['+str(y_sh_1)+']  ')
+        if not y_sh: y_sh = y_sh_1
+        y_sh = int(y_sh)
+        y_sh_1 = y_sh
+
+        co[:,0] += x_sh
+        co[:,1] += y_sh
+
+    # And centroid
+    co[:,0],co[:,1] = photutils.centroids.centroid_sources(data,co[:,0],co[:,1],
+                                centroid_func=photutils.centroids.centroid_2dg)
+
+    del_x = np.mean(co[:,0]-orig_co[:,0])
+    del_y = np.mean(co[:,1]-orig_co[:,1])
+
+    for j in range(len(co)):
+        apcircle = Circle((co[j,0], co[j,1]), aprad, facecolor='none',
+                edgecolor='b', linewidth=1, alpha=1)
+        ax1.add_patch(apcircle)
+
+        ax1.text(co[j,0]+20,co[j,1]-20,str(j+1),color='cornflowerblue')
+
+
+
+    # Define apertures and do simple photometry on sequence stars
+
+    photaps = photutils.CircularAperture(co, r=aprad)
+
+    skyaps = photutils.CircularAnnulus(co, r_in=aprad, r_out=aprad+skyrad)
+
+    skymasks = skyaps.to_mask(method='center')
+
+    # Get median sky in annulus for each star
+
+    bkg_median = []
+    for mask in skymasks:
+        try:
+            skydata = mask.multiply(data)
+            skydata_1d = skydata[mask.data > 0]
+            meansky, mediansky, sigsky = astropy.stats.sigma_clipped_stats(skydata_1d)
+            bkg_median.append(mediansky)
+        except:
+            bkg_median.append(0.)
+    bkg_median = np.array(bkg_median)
+    photTab = photutils.aperture_photometry(data, photaps)
+    photTab['local_sky'] = bkg_median
+    photTab['aper_sum_sub'] = photTab['aperture_sum'] - bkg_median * photaps.area()
+
+    # PSF Photometry
+
+    # Required formats for photutils:
+    nddata = astropy.nddata.NDData(data=data)
+    psfinput = astropy.table.Table()
+    psfinput['x'] = co[:,0]
+    psfinput['y'] = co[:,1]
+
+    # Create model from sequence stars
     happy = 'n'
-    j = 1
-    rmStar = 999
     while happy!='y':
 
-        daophot.pselect(infiles=image+'.pst.'+str(j),
-                        outfiles=image+'.pst.'+str(j+1),
-                        expr='ID!='+str(rmStar))
+        # extract stars from image
+        psfstars = photutils.psf.extract_stars(nddata, psfinput, size=aprad+skyrad)
 
-        daophot.psf(image=image,photfile='default',pstfile='default',
-                    psfimage='default',opstfile='default',groupfil='default',
-                    verify='no',interactive='no')
+        # build PSF
 
-        iraf.txdump(textfile=image+'.pst.'+str(j+1),fields='ID',expr='yes',
-                    Stdout=os.path.join(outdir,image+'_psf_stars.txt'))
+        print('Fitting PSF:')
+        epsf_builder = photutils.EPSFBuilder(oversampling=1.0)
+        epsf, fitted_stars = epsf_builder(psfstars)
 
-        psfList = np.genfromtxt(os.path.join(outdir,image+'_psf_stars.txt'),
-                                dtype='int')
+        psf = epsf.data
 
-        for k in psfList:
-            ax1.errorbar(co[k-1,0],co[k-1,1],fmt='*',mfc='none',
-                            markeredgecolor='lime',markeredgewidth=2,
-                            markersize=30,label='Used in PSF fit')
-
-        # This doesn't remove stars from plot - need to give some thought!!!
-
-        handles, labels = ax1.get_legend_handles_labels()
-        by_label = OrderedDict(zip(labels, handles))
-        ax1.legend(by_label.values(), by_label.keys(),
-                    numpoints=1,prop={'size':16}, handletextpad=0.5,
-                    labelspacing=0.5, borderaxespad=1, ncol=3,
-                    bbox_to_anchor=(1, 1.2))
-
-        daophot.seepsf(psfimage=image+'.psf.'+str(j)+'.fits',
-                        image=os.path.join(outdir,image+'_psf.fits'))
-
-        psfIm = pyfits.open(os.path.join(outdir,image+'_psf.fits'))
-
-        psfIm[0].verify('fix')
-
-        psf = psfIm[0].data
-
-
-#        plt.clf()
-
+        ax2 = plt.subplot2grid((2,4),(0,2))
 
         ax2.imshow(psf, origin='lower',cmap='gray',
-                    vmin=np.mean(psf)-np.std(psf)*1.,
-                    vmax=np.mean(psf)+np.std(psf)*3.)
+                    vmin=visualization.ZScaleInterval().get_limits(psf)[0],
+                    vmax=visualization.ZScaleInterval().get_limits(psf)[1])
 
         ax2.get_yaxis().set_visible(False)
         ax2.get_xaxis().set_visible(False)
 
         ax2.set_title('PSF')
+
+        plt.draw()
 
 
         ax3 = plt.subplot2grid((2,4),(0,3),projection='3d')
@@ -630,303 +574,245 @@ for image in ims:
 
         ax3.set_axis_off()
 
+
         plt.draw()
 
 
-        happy = raw_input('\n> Happy with PSF? [y]')
-
+        happy = input('\nProceed with this PSF? [y] ')
         if not happy: happy = 'y'
-
         if happy != 'y':
-            rmStar = raw_input('Star to remove: ')
-            j+=1
-            os.remove(os.path.join(outdir,image+'_psf.fits'))
+            aprad = int(input('Try new aperture radius: [' +str(aprad)+']'))
 
 
-    daophot.allstar(image=image,photfile='default',psfimage='default',
-                    allstarfile='default',rejfile='default',subimage='default',
-                    verify='no',verbose='yes',fitsky='yes')
+    psfcoordTable = astropy.table.Table()
 
-    sub1 = pyfits.open(image+'.sub.1.fits')
+    # psfcoordTable['id'] = np.arange(len(co))
+    psfcoordTable['x_0'] = co[:,0]
+    psfcoordTable['y_0'] = co[:,1]
+    psfcoordTable['flux_0'] = photTab['aper_sum_sub']
 
-    sub1[0].verify('fix')
+    grouper = photutils.psf.DAOGroup(crit_separation=10.)
 
-    sub0 = sub1[0].data
+    # need an odd number of pixels to fit PSF
+    fitrad = 2*aprad - 1
 
-    ax1.imshow(sub0, origin='lower',cmap='gray',
-                vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                    len(data)/2/2:3*len(data)/2/2])-
-                    np.std(data[len(data)/2/2:3*len(data)/2/2,
-                    len(data)/2/2:3*len(data)/2/2])*0.5,
-                vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                    len(data)/2/2:3*len(data)/2/2])+
-                    np.std(data[len(data)/2/2:3*len(data)/2/2,
-                    len(data)/2/2:3*len(data)/2/2]))
+    psfphot = photutils.psf.BasicPSFPhotometry(group_maker=grouper,
+                    bkg_estimator=photutils.background.MMMBackground(),
+                    psf_model=epsf, fitshape=fitrad,
+                    finder=None, aperture_radius=aprad)
+
+    psfphotTab = psfphot.do_photometry(data, init_guesses=psfcoordTable)
+
+    psfsubIm = psfphot.get_residual_image()
+
+    ax1.imshow(psfsubIm, origin='lower',cmap='gray',
+                vmin=visualization.ZScaleInterval().get_limits(data)[0],
+                vmax=visualization.ZScaleInterval().get_limits(data)[1])
+
+    goodStars = (psfphotTab['flux_fit']/psfphotTab['flux_0']>0.95)&(psfphotTab['flux_fit']/psfphotTab['flux_0']<1.05)
+
+    ax1.errorbar(co[:,0][~goodStars],co[:,1][~goodStars],fmt='x',mfc='none',
+                markeredgewidth=2, color='C1',
+                markersize=8,label='Rejected stars')
+
+    ax1.text(len(data[:,0])*0.8,len(data[:,1])*0.9,'Rejected',color='C1')
+
 
 
 ########## Zero point from seq stars
 
     if filtername in seqMags:
 
-        iraf.txdump(textfile=image+'.als.1',fields='ID,MAG,MERR',expr='yes',
-                    Stdout=os.path.join(outdir,image+'_seqMags.txt'))
+        flux = np.array(psfphotTab['flux_fit'])[goodStars]
+        seqIm = -2.5*np.log10(flux)
 
-        seqIm1 = np.genfromtxt(os.path.join(outdir,image+'_seqMags.txt'))
-        seqIm1 = seqIm1[seqIm1[:,0].argsort()]
-        mask = np.array(seqIm1[:,0],dtype=int)[~np.isnan(seqIm1[:,1])]-1
-        seqIm = seqIm1[:,1]
-        seqErr = seqIm1[:,2]
-
-        zpList1 = seqMags[filtername][mask]-seqIm
+        zpList1 = seqMags[filtername][inframe][goodStars]-seqIm
 
         zp1 = np.mean(zpList1)
         errzp1 = np.std(zpList1)
 
-        print 'Initial zeropoint =  %.3f +/- %.3f\n' %(zp1,errzp1)
+        print('Initial zeropoint =  %.3f +/- %.3f\n' %(zp1,errzp1))
 
-        np.savetxt(os.path.join(outdir,'zp_list.txt'),zip(mask+1,zpList1),
-        fmt='%d\t%.3f')
+        checkMags = np.abs(seqIm+zp1-seqMags[filtername][inframe][goodStars])<errzp1*sigClip
 
-        checkMags = np.abs(seqIm+zp1-seqMags[filtername][mask])<errzp1*sigClip
+        if False in checkMags:
+            print('Rejecting stars from ZP: ')
+            print(psfphotTab['id'][goodStars][~checkMags])
+            print('ZPs:')
+            print(seqMags[filtername][inframe][goodStars][~checkMags]-seqIm[~checkMags])
 
-        print 'Rejecting stars from ZP: '
-        print seqIm1[:,0][~checkMags]
-        print 'ZPs:'
-        print seqMags[filtername][mask][~checkMags]-seqIm[~checkMags]
+        ax1.errorbar(co[:,0][goodStars][~checkMags],
+                    co[:,1][goodStars][~checkMags],fmt='x',mfc='none',
+                    markeredgewidth=2, color='C3',
+                    markersize=8,label='Rejected stars')
 
-        zpList = seqMags[filtername][mask][checkMags]-seqIm[checkMags]
+        zpList = seqMags[filtername][inframe][goodStars][checkMags]-seqIm[checkMags]
 
         ZP = np.mean(zpList)
         errZP = np.std(zpList)
 
-        print 'Zeropoint = %.3f +/- %.3f\n' %(ZP,errZP)
+        print('Zeropoint = %.3f +/- %.3f\n' %(ZP,errZP))
 
-        ZPfile.write(image+'\t'+filtername+'\t%.2f\t%.2f\t%.2f\n' %(mjd,ZP,errZP))
-
-
-
+    else:
+        ZP = np.nan
+        errZP = np.nan
 
 ########### SN photometry
-
 
     SNco[0] += del_x
     SNco[1] += del_y
 
-    iraf.centerpars.cbox = recen_rad_sn
-
-    recen_rad_1 = recen_rad_sn
-
-    np.savetxt(image+'_SNpix_sh.fits',SNco.reshape(1,2),fmt='%.6f')
-
-    recen = 'y'
-    j = 1
-    while recen!='n':
-
-        iraf.phot(image=image,coords=image+'_SNpix_sh.fits',output='default',
-                    interactive='no',verify='no',wcsin='logical',verbose='yes')
-
-        daophot.allstar(image=image,photfile=image+'.mag.'+str(j+1),
-                        psfimage='default',allstarfile='default',
-                        rejfile='default',subimage='default',verify='no',
-                        verbose='yes',fitsky='yes',recenter='no')
-
-        sub1 = pyfits.open(image+'.sub.'+str(j+1)+'.fits')
-
-        sub1[0].verify('fix')
-
-        sub = sub1[0].data
-
-        ax4 = plt.subplot2grid((2,4),(1,2))
+    SNco[0],SNco[1] = photutils.centroids.centroid_sources(data,SNco[0],SNco[1],
+                                centroid_func=photutils.centroids.centroid_2dg)
 
 
-        ax4.imshow(data, origin='lower',cmap='gray',
-                            vmin=np.median(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])-
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])*0.5,
-                            vmax=np.median(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])+
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2]))
+    ax4 = plt.subplot2grid((2,4),(1,2))
 
 
-        ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
-        ax4.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
+    ax4.imshow(data, origin='lower',cmap='gray',
+                vmin=visualization.ZScaleInterval().get_limits(data)[0],
+                vmax=visualization.ZScaleInterval().get_limits(data)[1])
 
-        ax4.get_yaxis().set_visible(False)
-        ax4.get_xaxis().set_visible(False)
+    ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
+    ax4.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
 
-        ax4.set_title('Supernova')
+    ax4.get_yaxis().set_visible(False)
+    ax4.get_xaxis().set_visible(False)
 
-        apcircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
-                edgecolor='r', linewidth=3, alpha=1)
-        ax4.add_patch(apcircle)
+    ax4.set_title('Target')
 
-        skycircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
-                edgecolor='r', linewidth=3, alpha=1)
-        ax4.add_patch(skycircle)
+    apcircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+            edgecolor='r', linewidth=3, alpha=1)
+    ax4.add_patch(apcircle)
 
+    skycircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+            edgecolor='r', linewidth=3, alpha=1)
+    ax4.add_patch(skycircle)
 
-        ax5 = plt.subplot2grid((2,4),(1,3))
-
-        ax5.imshow(sub, origin='lower',cmap='gray',
-                            vmin=np.median(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])-
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])*0.5,
-                            vmax=np.median(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])+
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2]))
-
-
-        ax5.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
-        ax5.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
-
-        ax5.get_yaxis().set_visible(False)
-        ax5.get_xaxis().set_visible(False)
-
-        ax5.set_title('Subtracted image')
-
-        apcircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
-                edgecolor='r', linewidth=3, alpha=1)
-        ax5.add_patch(apcircle)
-
-        skycircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
-                edgecolor='r', linewidth=3, alpha=1)
-        ax5.add_patch(skycircle)
-
-        plt.draw()
-
-
-        recen = raw_input('\n> Adjust recentering radius? [n]  ')
-
-        if not recen: recen = 'n'
-
-        if recen!= 'n':
-            recen_rad = raw_input('\n> Enter radius ['+str(recen_rad_1)+']  ')
-            if not recen_rad: recen_rad = recen_rad_1
-            recen_rad = int(recen_rad)
-            iraf.centerpars.cbox = recen_rad
-            recen_rad_1 = recen_rad
-            j += 1
+    plt.draw()
 
 
 
-    iraf.txdump(textfile=image+'.mag.'+str(j+1),fields='MAG,MERR',expr='yes',
-                Stdout=os.path.join(outdir,image+'_SN_ap.txt'))
+    # aperture
 
-    iraf.txdump(textfile=image+'.als.'+str(j+1),fields='MAG,MERR',expr='yes',
-                Stdout=os.path.join(outdir,image+'_SN_dao.txt'))
+    photap = photutils.CircularAperture(SNco, r=aprad)
+
+    skyap = photutils.CircularAnnulus(SNco, r_in=aprad, r_out=aprad+skyrad)
+
+    skymask = skyap.to_mask(method='center')
+
+    # Get median sky in annulus around transient
+    bkg_median = []
+    skydata = skymask[0].multiply(data)
+    skydata_1d = skydata[skymask[0].data > 0]
+    meansky, mediansky, sigsky = astropy.stats.sigma_clipped_stats(skydata_1d)
+    bkg_median.append(mediansky)
+    bkg_median = np.array(bkg_median)
+    SNphotTab = photutils.aperture_photometry(data, photap)
+    SNphotTab['local_sky'] = bkg_median
+    SNphotTab['aper_sum_sub'] = SNphotTab['aperture_sum'] - bkg_median * photap.area()
 
 
-    apmag = np.genfromtxt(os.path.join(outdir,image+'_SN_ap.txt'))
 
-    SNap = apmag[0]
-    errSNap = apmag[1]
+    SNcoordTable = astropy.table.Table()
+    SNcoordTable['x_0'] = SNco[0]
+    SNcoordTable['y_0'] = SNco[1]
+    SNcoordTable['flux_0'] = SNphotTab['aper_sum_sub']
 
-    daomag = np.genfromtxt(os.path.join(outdir,image+'_SN_dao.txt'))
+
+    # psfphot = photutils.psf.BasicPSFPhotometry(group_maker=grouper,
+    #                 bkg_estimator=photutils.background.MMMBackground(),
+    #                 psf_model=epsf, fitshape=fitrad,
+    #                 finder=None, aperture_radius=aprad)
+
+    SNpsfphotTab = psfphot.do_photometry(data, init_guesses=SNcoordTable)
+
+    SNpsfsubIm = psfphot.get_residual_image()
+
+    ax5 = plt.subplot2grid((2,4),(1,3))
+
+    ax5.imshow(SNpsfsubIm, origin='lower',cmap='gray',
+                vmin=visualization.ZScaleInterval().get_limits(data)[0],
+                vmax=visualization.ZScaleInterval().get_limits(data)[1])
+
+
+    ax5.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
+    ax5.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
+
+    ax5.get_yaxis().set_visible(False)
+    ax5.get_xaxis().set_visible(False)
+
+    ax5.set_title('PSF subtracted')
+
+    apcircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+            edgecolor='r', linewidth=3, alpha=1)
+    ax5.add_patch(apcircle)
+
+    skycircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+            edgecolor='r', linewidth=3, alpha=1)
+    ax5.add_patch(skycircle)
+
+    plt.draw()
+
+
+    # Convert flux to instrumental magnitudes
+
+    SNap = -2.5*np.log10(SNphotTab['aper_sum_sub'])
+    # aperture mag error assuming Poisson noise
+    errSNap = abs(SNap * np.sqrt( 1/SNphotTab['aper_sum_sub'] + 1/(bkg_median * photap.area()) ) )
 
     try:
-        SNdao = daomag[0]
-        errSNdao = daomag[1]
+        SNpsf = -2.5*np.log10(SNpsfphotTab['flux_fit'])
+        errSNpsf = abs(SNpsf * SNpsfphotTab['flux_unc']/SNpsfphotTab['flux_fit'])
     except:
-        print 'PSF could not be fit, using aperture mag'
-        SNdao = np.nan
-        errSNdao = np.nan
+        SNpsf = np.nan
+        errSNpsf = np.nan
+        print('PSF fit failed, aperture mag only!')
 
-
-    print '\n'
+    print('\n')
 
     if filtername in seqMags:
 
-        calMagsDao = SNdao + ZP
+        calMagPsf = SNpsf + ZP
 
-        errMagDao = np.sqrt(errSNdao**2 + errZP**2)
+        errMagPsf = np.sqrt(errSNpsf**2 + errZP**2)
 
 
-        calMagsAp = SNap + ZP
+        calMagAp = SNap + ZP
 
         errMagAp = np.sqrt(errSNap**2 + errZP**2)
 
     else:
-        calMagsDao = SNdao
+        calMagPsf = SNpsf
 
-        errMagDao = errSNdao
+        errMagPsf = errSNpsf
 
 
-        calMagsAp = SNap
+        calMagAp = SNap
 
         errMagAp = errSNap
 
         comment1 = 'No ZP - instrumental mag only'
 
-        print '> No ZP - instrumental mag only!!!'
+        print('> No ZP - instrumental mag only!!!')
 
 
 
-    print '> PSF mag = '+'%.2f +/- %.2f' %(calMagsDao,errMagDao)
-    print '> Aperture mag = '+'%.2f +/- %.2f' %(calMagsAp,errMagAp)
+    print('> PSF mag = '+'%.2f +/- %.2f' %(calMagPsf,errMagPsf))
+    print('> Aperture mag = '+'%.2f +/- %.2f' %(calMagAp,errMagAp))
 
 
-    comment = raw_input('\n> Add comment to output file: ')
+    comment = input('\n> Add comment to output file: ')
 
     if comment1:
         comment += (' // '+comment1)
 
-    outFile.write('\n'+image+'\t'+filtername+'\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t'
-                    %(mjd,calMagsDao,errMagDao,calMagsAp,errMagAp))
+    outFile.write('\n'+image+'\t'+filtername+'\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t'
+                    %(mjd,calMagPsf,errMagPsf,calMagAp,errMagAp,ZP,errZP))
     outFile.write(comment)
 
 
 outFile.close()
 
-ZPfile.close()
 
-
-os.remove('phot_out.txt')
-
-
-for i in glob.glob('*.mag.*'):
-    shutil.copy(i,outdir)
-
-for i in glob.glob('*.psf.*'):
-    shutil.copy(i,outdir)
-
-# for i in glob.glob('*.sub.*'):
-#     shutil.copy(i,outdir)
-
-for i in glob.glob('*.mag.*'):
-    os.remove(i)
-
-for i in glob.glob('*.psf.*'):
-    os.remove(i)
-
-if not args.keep_sub:
-    for i in glob.glob('*.sub.*'):
-        os.remove(i)
-
-
-for i in glob.glob('*.als.*'):
-    os.remove(i)
-
-for i in glob.glob('*.arj.*'):
-    os.remove(i)
-
-for i in glob.glob('*.pst.*'):
-    os.remove(i)
-
-for i in glob.glob('*.psg.*'):
-    os.remove(i)
-
-for i in glob.glob('*pix*fits'):
-    os.remove(i)
-
-for i in glob.glob('*_psf_stars.txt'):
-    os.remove(i)
-
-for i in glob.glob('coords'):
-    os.remove(i)
-
-
-print '\n##########################################\nFinished!\nCalibrated PSF phot saved to ./PSF_phot.txt\nAperture photometry saved to ./ap_phot.txt\nCheck PSF_output/ for additional info\n##########################################'
+print('\n##########################################\nFinished!\nCalibrated PSF phot saved to ./PSF_phot.txt\nAperture photometry saved to ./ap_phot.txt\nCheck PSF_output/ for additional info\n##########################################')

@@ -84,6 +84,9 @@ for i in glob.glob('shifts.txt'):
 for i in glob.glob('shifted_*'):
     os.remove(i)
 
+for i in glob.glob('template0.fits'):
+    os.remove(i)
+
 
 parser = argparse.ArgumentParser()
 
