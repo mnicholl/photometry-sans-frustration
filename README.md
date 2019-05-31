@@ -2,7 +2,7 @@
 
 Interactive python wrapper for point-spread fitting (PSF) photometry using Astropy (previous python 2 version used iraf/daophot tasks)
 
-Requires two text files: one with transient coordinates and one with reference stars (see examples)
+Requires two text files: one with transient coordinates and one with reference stars (see examples). If no reference star file is provided, code will attempt to create one by querying the PanSTARRS catalog.
 
 psf:
 measure transient photometry on image. Can specify multiple images with list or wildcards to run in batch mode (runs on all fits files in directory if left unspecified).
