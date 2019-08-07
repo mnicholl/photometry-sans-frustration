@@ -474,15 +474,42 @@ for f in usedfilters:
                 data = im[1].data
                 header = im[1].header
 
-        print('\nSubtracting background...')
+
+        # Set up sequence stars, initial steps
+        co = astropy.wcs.WCS(header=header).all_world2pix(seqDat[:,0],seqDat[:,1],1)
+        co = np.array(list(zip(co[0],co[1])))
+
+        # Remove any stars falling outside the image
+        inframe = (co[:,0]>0)&(co[:,0]<len(data[0])-1)&(co[:,1]>0)&(co[:,1]<len(data)-1)
+        co = co[inframe]
+
+        # Find and remove bad pixels and sequence stars: nans, regions of zero etc.
+        goodpix = []
+        for c in range(len(co)):
+            if data[int(co[c][1]),int(co[c][0])] != 0:  # Remember RA, dec = y, x in our data array
+                goodpix.append(c)
+
+        co = co[goodpix]
+
+        orig_co = co.copy()
+
 
         # background subtraction:
 
-        bkg = photutils.background.Background2D(data,box_size=bkgbox)
+        # first clean bad regions before fitting
+        data[data==0] = np.median(data)
 
-        data = data.astype(float) - bkg.background
+        data[np.isnan(data)] = np.median(data)
 
-        print('Done')
+        data[np.isinf(data)] = np.median(data)
+
+        # print('\nSubtracting background...')
+        #
+        # bkg = photutils.background.Background2D(data,box_size=bkgbox)
+        #
+        # data = data.astype(float) - bkg.background
+        #
+        # print('Done')
 
     ########## plot data
 
@@ -507,15 +534,6 @@ for f in usedfilters:
         ax1.get_xaxis().set_visible(False)
 
         print('\nFinding sequence star centroids...')
-
-        co = astropy.wcs.WCS(header=header).all_world2pix(seqDat[:,0],seqDat[:,1],1)
-        co = np.array(list(zip(co[0],co[1])))
-
-        # Remove any stars falling outside the image
-        inframe = (co[:,0]>0)&(co[:,0]<len(data[0])-1)&(co[:,1]>0)&(co[:,1]<len(data)-1)
-        co = co[inframe]
-
-        orig_co = co.copy()
 
         # Mark sequence stars
         ax1.errorbar(co[:,0],co[:,1],fmt='s',mfc='none',markeredgecolor='C0',
@@ -553,8 +571,14 @@ for f in usedfilters:
         co[:,0],co[:,1] = photutils.centroids.centroid_sources(data,co[:,0],co[:,1],
                                     centroid_func=photutils.centroids.centroid_2dg)
 
-        del_x = np.mean(co[:,0]-orig_co[:,0])
-        del_y = np.mean(co[:,1]-orig_co[:,1])
+        del_x = np.nanmedian(co[:,0]-orig_co[:,0])
+        del_y = np.nanmedian(co[:,1]-orig_co[:,1])
+        sig_x = np.nanstd(co[:,0]-orig_co[:,0])
+        sig_y = np.nanstd(co[:,1]-orig_co[:,1])
+
+        found = (abs(co[:,0]-orig_co[:,0])<abs(del_x)*10)&(abs(co[:,1]-orig_co[:,1])<abs(del_y)*10)
+
+        co = co[found]
 
         for j in range(len(co)):
             apcircle = Circle((co[j,0], co[j,1]), aprad, facecolor='none',
@@ -608,7 +632,7 @@ for f in usedfilters:
         while happy!='y':
 
             # extract stars from image
-            psfstars = photutils.psf.extract_stars(nddata, psfinput, size=aprad+skyrad)
+            psfstars = photutils.psf.extract_stars(nddata, psfinput, size=2*aprad)
 
             # build PSF
             epsf_builder = photutils.EPSFBuilder(oversampling=1.0)
@@ -661,7 +685,7 @@ for f in usedfilters:
         psfcoordTable['y_0'] = co[:,1]
         psfcoordTable['flux_0'] = photTab['aper_sum_sub']
 
-        grouper = photutils.psf.DAOGroup(crit_separation=10.)
+        grouper = photutils.psf.DAOGroup(crit_separation=aprad)
 
         # need an odd number of pixels to fit PSF
         fitrad = 2*aprad - 1
@@ -698,7 +722,7 @@ for f in usedfilters:
             flux = np.array(psfphotTab['flux_fit'])[goodStars]
             seqIm = -2.5*np.log10(flux)
 
-            zpList1 = seqMags[f][inframe][goodStars]-seqIm
+            zpList1 = seqMags[f][inframe][goodpix][found][goodStars]-seqIm
 
             zp1 = np.mean(zpList1)
             errzp1 = np.std(zpList1)
@@ -706,20 +730,20 @@ for f in usedfilters:
             print('\nInitial zeropoint =  %.2f +/- %.2f\n' %(zp1,errzp1))
             print('Checking for bad stars...')
 
-            checkMags = np.abs(seqIm+zp1-seqMags[f][inframe][goodStars])<errzp1*sigClip
+            checkMags = np.abs(seqIm+zp1-seqMags[f][inframe][goodpix][found][goodStars])<errzp1*sigClip
 
             if False in checkMags:
                 print('Rejecting stars from ZP: ')
                 print(psfphotTab['id'][goodStars][~checkMags])
                 print('Bad ZPs:')
-                print(seqMags[f][inframe][goodStars][~checkMags]-seqIm[~checkMags])
+                print(seqMags[f][inframe][goodpix][found][goodStars][~checkMags]-seqIm[~checkMags])
 
             ax1.errorbar(co[:,0][goodStars][~checkMags],
                         co[:,1][goodStars][~checkMags],fmt='x',mfc='none',
                         markeredgewidth=2, color='C3',
                         markersize=8,label='Rejected stars')
 
-            zpList = seqMags[f][inframe][goodStars][checkMags]-seqIm[checkMags]
+            zpList = seqMags[f][inframe][goodpix][found][goodStars][checkMags]-seqIm[checkMags]
 
             ZP = np.mean(zpList)
             errZP = np.std(zpList)
