@@ -480,7 +480,7 @@ for f in usedfilters:
 
         bkg = photutils.background.Background2D(data,box_size=bkgbox)
 
-        data -= bkg.background
+        data = data.astype(float) - bkg.background
 
         print('Done')
 
