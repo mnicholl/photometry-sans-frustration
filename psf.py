@@ -466,6 +466,7 @@ for f in usedfilters:
 
                 data = im[0].data
                 header = im[0].header
+                checkdat = len(data)
 
             except:
                 im[1].verify('fix')
