@@ -832,7 +832,7 @@ for f in usedfilters:
 
         SNap = -2.5*np.log10(SNphotTab['aper_sum_sub'])
         # aperture mag error assuming Poisson noise
-        errSNap = abs(SNap * np.sqrt( 1/SNphotTab['aper_sum_sub'] + 1/(bkg_median * photap.area()) ) )
+        errSNap = abs(SNap * np.sqrt(SNphotTab['aper_sum_sub']) / SNphotTab['aper_sum_sub'] )
 
         try:
             SNpsf = -2.5*np.log10(SNpsfphotTab['flux_fit'])
