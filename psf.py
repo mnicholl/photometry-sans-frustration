@@ -503,13 +503,13 @@ for f in usedfilters:
 
         data[np.isinf(data)] = np.median(data)
 
-        # print('\nSubtracting background...')
-        #
-        # bkg = photutils.background.Background2D(data,box_size=bkgbox)
-        #
-        # data = data.astype(float) - bkg.background
-        #
-        # print('Done')
+        print('\nSubtracting background...')
+
+        bkg = photutils.background.Background2D(data,box_size=bkgbox)
+
+        data = data.astype(float) - bkg.background
+
+        print('Done')
 
     ########## plot data
 
@@ -613,8 +613,10 @@ for f in usedfilters:
         bkg_median = np.array(bkg_median)
         photTab = photutils.aperture_photometry(data, photaps)
         photTab['local_sky'] = bkg_median
-        photTab['aper_sum_sub'] = photTab['aperture_sum'] - bkg_median * photaps.area()
-
+        try:
+            photTab['aper_sum_sub'] = photTab['aperture_sum'] - bkg_median * photaps.area
+        except:
+            photTab['aper_sum_sub'] = photTab['aperture_sum'] - bkg_median * photaps.area() #older versions of photutils
         print('Done')
 
 
@@ -635,7 +637,7 @@ for f in usedfilters:
             psfstars = photutils.psf.extract_stars(nddata, psfinput, size=2*aprad)
 
             # build PSF
-            epsf_builder = photutils.EPSFBuilder(oversampling=1.0)
+            epsf_builder = photutils.EPSFBuilder(maxiters=5,recentering_maxiters=5,oversampling=1)
             epsf, fitted_stars = epsf_builder(psfstars)
 
             psf = epsf.data
@@ -764,9 +766,9 @@ for f in usedfilters:
         SNco[0] += del_x
         SNco[1] += del_y
 
-        SNco[0],SNco[1] = photutils.centroids.centroid_sources(data,SNco[0],SNco[1],
-                                    centroid_func=photutils.centroids.centroid_2dg)
-
+        # SNco[0],SNco[1] = photutils.centroids.centroid_sources(data,SNco[0],SNco[1],
+        #                             centroid_func=photutils.centroids.centroid_2dg)
+        SNco = [np.array([SNco[0]]),np.array([SNco[1]])]
 
         ax4 = plt.subplot2grid((2,4),(1,2))
 
@@ -808,7 +810,10 @@ for f in usedfilters:
         bkg_median = np.array(bkg_median)
         SNphotTab = photutils.aperture_photometry(data, photap)
         SNphotTab['local_sky'] = bkg_median
-        SNphotTab['aper_sum_sub'] = SNphotTab['aperture_sum'] - bkg_median * photap.area()
+        try:
+            SNphotTab['aper_sum_sub'] = SNphotTab['aperture_sum'] - bkg_median * photap.area
+        except:
+            SNphotTab['aper_sum_sub'] = SNphotTab['aperture_sum'] - bkg_median * photap.area() #older versions of photutils
 
         print('Aperture done')
 
@@ -817,6 +822,13 @@ for f in usedfilters:
         SNcoordTable['x_0'] = SNco[0]
         SNcoordTable['y_0'] = SNco[1]
         SNcoordTable['flux_0'] = SNphotTab['aper_sum_sub']
+
+        epsf.x_0.fixed = True
+        epsf.y_0.fixed = True
+        psfphot = photutils.psf.BasicPSFPhotometry(group_maker=grouper,
+                        bkg_estimator=photutils.background.MMMBackground(),
+                        psf_model=epsf, fitshape=fitrad,
+                        finder=None, aperture_radius=aprad)
 
         SNpsfphotTab = psfphot.do_photometry(data, init_guesses=SNcoordTable)
 
