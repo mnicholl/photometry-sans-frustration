@@ -194,6 +194,9 @@ parser.add_argument('--magmin', dest='magmin', default=21.5, type=float,
 parser.add_argument('--magmax', dest='magmax', default=16.5, type=float,
                     help='Brightest sequence stars to return from PS1 query ')
 
+parser.add_argument('--shifts', dest='shifts', default=False, action='store_true',
+                    help='Apply manual shifts if WCS is a bit off ')
+
 
 args = parser.parse_args()
 
@@ -209,6 +212,7 @@ z1 = args.z1
 z2 = args.z2
 magmin = args.magmin
 magmax = args.magmax
+shifts = args.shifts
 
 ims = [i for i in args.file_to_reduce]
 
@@ -445,16 +449,6 @@ for image in ims:
 
         header = im[0].header
 
-        ax1.imshow(data, origin='lower',cmap='gray',
-                            vmin=np.median(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])-
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])*0.5,
-                            vmax=np.median(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])+
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2]))
-
     except:
         im = pyfits.open(image)
 
@@ -464,14 +458,15 @@ for image in ims:
 
         header = im[1].header
 
-        ax1.imshow(data, origin='lower',cmap='gray',
+
+    ax1.imshow(data, origin='lower',cmap='gray',
                             vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])-
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])*0.5,
                             vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])+
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2]))
 
 
@@ -516,24 +511,26 @@ for image in ims:
 
 ########### Centering
 
-    # Manual shifts:
-    x_sh = raw_input('\n> Add approx pixel shift in x? ['+str(x_sh_1)+']  ')
-    if not x_sh: x_sh = x_sh_1
-    x_sh = int(x_sh)
-    x_sh_1 = x_sh
-
-    y_sh = raw_input('\n> Add approx pixel shift in y? ['+str(y_sh_1)+']  ')
-    if not y_sh: y_sh = y_sh_1
-    y_sh = int(y_sh)
-    y_sh_1 = y_sh
-
     shutil.copy(image+'_pix.fits',image+'_orig_pix.fits')
 
     pix_coords = np.genfromtxt(image+'_pix.fits')
-    pix_coords[:,0] += x_sh
-    pix_coords[:,1] += y_sh
 
-    np.savetxt(image+'_pix.fits',pix_coords)
+    # Manual shifts:
+    if shifts:
+        x_sh = raw_input('\n> Add approx pixel shift in x? ['+str(x_sh_1)+']  ')
+        if not x_sh: x_sh = x_sh_1
+        x_sh = int(x_sh)
+        x_sh_1 = x_sh
+
+        y_sh = raw_input('\n> Add approx pixel shift in y? ['+str(y_sh_1)+']  ')
+        if not y_sh: y_sh = y_sh_1
+        y_sh = int(y_sh)
+        y_sh_1 = y_sh
+
+        pix_coords[:,0] += x_sh
+        pix_coords[:,1] += y_sh
+
+        np.savetxt(image+'_pix.fits',pix_coords)
 
     # recenter on seq stars and generate star list for daophot:
     iraf.phot(image=image,coords=image+'_pix.fits',output='default',
@@ -654,14 +651,14 @@ for image in ims:
     sub0 = sub1[0].data
 
     ax1.imshow(sub0, origin='lower',cmap='gray',
-                vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                    len(data)/2/2:3*len(data)/2/2])-
-                    np.std(data[len(data)/2/2:3*len(data)/2/2,
-                    len(data)/2/2:3*len(data)/2/2])*0.5,
-                vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                    len(data)/2/2:3*len(data)/2/2])+
-                    np.std(data[len(data)/2/2:3*len(data)/2/2,
-                    len(data)/2/2:3*len(data)/2/2]))
+                                vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
+                                    len(data)/2/2:3*len(data)/2/2])-
+                                    z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                    len(data)/2/2:3*len(data)/2/2])*0.5,
+                                vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
+                                    len(data)/2/2:3*len(data)/2/2])+
+                                    z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                    len(data)/2/2:3*len(data)/2/2]))
 
 
 ########## Zero point from seq stars
@@ -740,14 +737,14 @@ for image in ims:
 
 
         ax4.imshow(data, origin='lower',cmap='gray',
-                            vmin=np.median(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])-
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])*0.5,
-                            vmax=np.median(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])+
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2]))
+                    vmin=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
+                                int(SNco[1])-100:int(SNco[1])+100])-
+                            z1*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
+                                int(SNco[1])-100:int(SNco[1])+100]),
+                    vmax=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
+                                int(SNco[1])-100:int(SNco[1])+100])+
+                            z2*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
+                                int(SNco[1])-100:int(SNco[1])+100]))
 
 
         ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
@@ -770,14 +767,14 @@ for image in ims:
         ax5 = plt.subplot2grid((2,4),(1,3))
 
         ax5.imshow(sub, origin='lower',cmap='gray',
-                            vmin=np.median(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])-
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])*0.5,
-                            vmax=np.median(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])+
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2]))
+                    vmin=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
+                                int(SNco[1])-100:int(SNco[1])+100])-
+                            z1*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
+                                int(SNco[1])-100:int(SNco[1])+100]),
+                    vmax=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
+                                int(SNco[1])-100:int(SNco[1])+100])+
+                            z2*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
+                                int(SNco[1])-100:int(SNco[1])+100]))
 
 
         ax5.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))

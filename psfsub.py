@@ -139,6 +139,15 @@ parser.add_argument('--magmin', dest='magmin', default=21.5, type=float,
 parser.add_argument('--magmax', dest='magmax', default=16.5, type=float,
                     help='Brightest sequence stars to return from PS1 query ')
 
+parser.add_argument('--templatesize', dest='templatesize', default=2500, type=int,
+                    help='Size of PS1 template to download (pixels) ')
+
+parser.add_argument('--shifts', dest='shifts', default=False, action='store_true',
+                    help='Apply manual shifts if WCS is a bit off ')
+
+parser.add_argument('--trim', dest='trim', default=1, type=float,
+                    help='Cut down target image by this factor in x and y ')
+
 
 
 args = parser.parse_args()
@@ -147,6 +156,8 @@ args = parser.parse_args()
 image = args.image
 template = args.template
 keep = args.keep
+shifts = args.shifts
+trim = args.trim
 
 aprad = args.aprad
 skyrad = args.skyrad
@@ -159,6 +170,7 @@ z1 = args.z1
 z2 = args.z2
 magmin = args.magmin
 magmax = args.magmax
+templatesize = args.templatesize
 
 
 ##################################################
@@ -347,17 +359,37 @@ if filtername1 not in filtAll:
 
 
 # template
+if not template:
+    suggTemp = glob.glob(filtername1+'_template.fits')
+
+    if len(suggTemp)==0:
+        suggTemp = glob.glob('../'+filtername1+'_template.fits')
+
+    if len(suggTemp)==0:
+        suggTemp = glob.glob('../../'+filtername1+'_template.fits')
+
+    if len(suggTemp)>0:
+        template = suggTemp[0]
+    else:
+        print 'No template found locally...'
+
+    print '\n####################\n\nTemplate found: '+template
 
 
 ######## DOWNLOAD TEMPLATE FROM PS1 ##########
 
 if template == 'ps1':
-    try:
-        PS1cutouts(RAdec[0],RAdec[1],filtername1)
+    if os.path.exists(filtername1+'_template.fits'):
         template = filtername1 + '_template.fits'
         filtername2 = filtername1
-    except:
-        sys.exit('Error: could not match template from PS1')
+        print('PS1 template found in working directory')
+    else:
+        try:
+            PS1cutouts(RAdec[0],RAdec[1],filtername1,templatesize)
+            template = filtername1 + '_template.fits'
+            filtername2 = filtername1
+        except:
+            sys.exit('Error: could not match template from PS1')
 
 
 ##############################################
@@ -405,7 +437,28 @@ for i in glob.glob(filtername2+'_aligned_*'):
 for i in glob.glob(image.split('.fits')[0]+'_ped.fits'):
     os.remove(i)
 
-
+if trim>1.01:
+    try:
+        xlen = pyfits.getval(image,'NAXIS1')
+        ylen = pyfits.getval(image,'NAXIS2')
+    except:
+        try:
+            im = pyfits.open(image)
+            imdata = im[0].data
+        except:
+            im = pyfits.open(image)
+            imdata = im[1].data
+        xlen = imdata.shape[0]
+        ylen = imdata.shape[1]
+    xtrim1 = int(xlen/2.-0.5*xlen/trim)
+    xtrim2 = int(xlen/2.+0.5*xlen/trim)
+    ytrim1 = int(ylen/2.-0.5*ylen/trim)
+    ytrim2 = int(ylen/2.+0.5*ylen/trim)
+    trimsection = '['+str(xtrim1)+':'+str(xtrim2)+','+str(ytrim1)+':'+str(ytrim2)+']'
+    for i in glob.glob(image.split('.fits')[0]+'_trim.fits'):
+        os.remove(i)
+    iraf.imcopy(input=image+trimsection,output=image.split('.fits')[0]+'_trim.fits')
+    image = image.split('.fits')[0]+'_trim.fits'
 
 ################################
 # Part two: Display images and get coordinates
@@ -440,8 +493,8 @@ except:
 
 iraf.wcsreset(image=image,wcs='physical')
 
-iraf.hedit(image=image,fields='TRIMSEC',value='[1:'+str(pyfits.getval(image,'NAXIS1'))+',1:'+str(pyfits.getval(image,'NAXIS2'))+']')
-iraf.hedit(image=image,fields='DATASEC',value='[1:'+str(pyfits.getval(image,'NAXIS1'))+',1:'+str(pyfits.getval(image,'NAXIS2'))+']')
+iraf.hedit(image=image,fields='TRIMSEC',value='[1:'+str(pyfits.getval(image,'NAXIS1'))+',1:'+str(pyfits.getval(image,'NAXIS2'))+']',verify='no')
+iraf.hedit(image=image,fields='DATASEC',value='[1:'+str(pyfits.getval(image,'NAXIS1'))+',1:'+str(pyfits.getval(image,'NAXIS2'))+']',verify='no')
 
 
 
@@ -450,11 +503,11 @@ imdata[np.isnan(imdata)] = np.median(imdata[~np.isnan(imdata)])
 ax1.imshow(imdata, origin='lower',cmap='gray',
                         vmin=np.mean(imdata[len(imdata)/2/2:3*len(imdata)/2/2,
                             len(imdata)/2/2:3*len(imdata)/2/2])-
-                            np.std(imdata[len(imdata)/2/2:3*len(imdata)/2/2,
+                            z1*np.std(imdata[len(imdata)/2/2:3*len(imdata)/2/2,
                             len(imdata)/2/2:3*len(imdata)/2/2])*0.5,
                         vmax=np.mean(imdata[len(imdata)/2/2:3*len(imdata)/2/2,
                             len(imdata)/2/2:3*len(imdata)/2/2])+
-                            np.std(imdata[len(imdata)/2/2:3*len(imdata)/2/2,
+                            z2*np.std(imdata[len(imdata)/2/2:3*len(imdata)/2/2,
                             len(imdata)/2/2:3*len(imdata)/2/2]))
 
 ax1.set_title('Science image')
@@ -495,21 +548,26 @@ ax1.text(SNco[0]+30,SNco[1]+30,'Target',color='r')
 
 ########### Centering
 
-# Manual shifts:
-x_sh = raw_input('\n> Add approx pixel shift in x? [0]  ')
-if not x_sh: x_sh = 0
-x_sh = int(x_sh)
-
-y_sh = raw_input('\n> Add approx pixel shift in y? [0]  ')
-if not y_sh: y_sh = 0
-y_sh = int(y_sh)
-
 shutil.copy(image+'_pix.fits',image+'_orig_pix.fits')
 
-co[:,0] += x_sh
-co[:,1] += y_sh
+pix_coords = np.genfromtxt(image+'_pix.fits')
 
-np.savetxt(image+'_pix.fits',co,fmt='%.2f')
+# Manual shifts:
+if shifts:
+    x_sh = raw_input('\n> Add approx pixel shift in x? ['+str(x_sh_1)+']  ')
+    if not x_sh: x_sh = x_sh_1
+    x_sh = int(x_sh)
+    x_sh_1 = x_sh
+
+    y_sh = raw_input('\n> Add approx pixel shift in y? ['+str(y_sh_1)+']  ')
+    if not y_sh: y_sh = y_sh_1
+    y_sh = int(y_sh)
+    y_sh_1 = y_sh
+
+    pix_coords[:,0] += x_sh
+    pix_coords[:,1] += y_sh
+
+    np.savetxt(image+'_pix.fits',pix_coords)
 
 # recenter on seq stars and generate star list for daophot:
 iraf.phot(image=image,coords=image+'_pix.fits',output='default',
@@ -630,11 +688,11 @@ sub0 = sub1[0].data
 ax1.imshow(sub0, origin='lower',cmap='gray',
             vmin=np.mean(imdata[len(imdata)/2/2:3*len(imdata)/2/2,
                 len(imdata)/2/2:3*len(imdata)/2/2])-
-                np.std(imdata[len(imdata)/2/2:3*len(imdata)/2/2,
+                z1*np.std(imdata[len(imdata)/2/2:3*len(imdata)/2/2,
                 len(imdata)/2/2:3*len(imdata)/2/2])*0.5,
             vmax=np.mean(imdata[len(imdata)/2/2:3*len(imdata)/2/2,
                 len(imdata)/2/2:3*len(imdata)/2/2])+
-                np.std(imdata[len(imdata)/2/2:3*len(imdata)/2/2,
+                z2*np.std(imdata[len(imdata)/2/2:3*len(imdata)/2/2,
                 len(imdata)/2/2:3*len(imdata)/2/2]))
 
 plt.draw()
@@ -749,8 +807,8 @@ except:
 
 iraf.wcsreset(image=template,wcs='physical')
 
-iraf.hedit(image=template,fields='TRIMSEC',value='[1:'+str(pyfits.getval(image,'NAXIS1'))+',1:'+str(pyfits.getval(image,'NAXIS2'))+']')
-iraf.hedit(image=template,fields='DATASEC',value='[1:'+str(pyfits.getval(image,'NAXIS1'))+',1:'+str(pyfits.getval(image,'NAXIS2'))+']')
+iraf.hedit(image=template,fields='TRIMSEC',value='[1:'+str(pyfits.getval(image,'NAXIS1'))+',1:'+str(pyfits.getval(image,'NAXIS2'))+']',verify='no')
+iraf.hedit(image=template,fields='DATASEC',value='[1:'+str(pyfits.getval(image,'NAXIS1'))+',1:'+str(pyfits.getval(image,'NAXIS2'))+']',verify='no')
 
 
 tdata[np.isnan(tdata)] = np.median(tdata[~np.isnan(tdata)])
@@ -758,11 +816,11 @@ tdata[np.isnan(tdata)] = np.median(tdata[~np.isnan(tdata)])
 ax1.imshow(tdata, origin='lower',cmap='gray',
                         vmin=np.mean(tdata[len(tdata)/2/2:3*len(tdata)/2/2,
                             len(tdata)/2/2:3*len(tdata)/2/2])-
-                            np.std(tdata[len(tdata)/2/2:3*len(tdata)/2/2,
+                            z1*np.std(tdata[len(tdata)/2/2:3*len(tdata)/2/2,
                             len(tdata)/2/2:3*len(tdata)/2/2])*0.5,
                         vmax=np.mean(tdata[len(tdata)/2/2:3*len(tdata)/2/2,
                             len(tdata)/2/2:3*len(tdata)/2/2])+
-                            np.std(tdata[len(tdata)/2/2:3*len(tdata)/2/2,
+                            z2*np.std(tdata[len(tdata)/2/2:3*len(tdata)/2/2,
                             len(tdata)/2/2:3*len(tdata)/2/2]))
 
 ax1.set_title('Template image')
@@ -793,20 +851,21 @@ plt.draw()
 ########### Centering
 
 # Manual shifts:
-x_sh = raw_input('\n> Add approx pixel shift in x? [0]  ')
-if not x_sh: x_sh = 0
-x_sh = int(x_sh)
+if shifts:
+    x_sh = raw_input('\n> Add approx pixel shift in x? [0]  ')
+    if not x_sh: x_sh = 0
+    x_sh = int(x_sh)
 
-y_sh = raw_input('\n> Add approx pixel shift in y? [0]  ')
-if not y_sh: y_sh = 0
-y_sh = int(y_sh)
+    y_sh = raw_input('\n> Add approx pixel shift in y? [0]  ')
+    if not y_sh: y_sh = 0
+    y_sh = int(y_sh)
 
 
-pix_coords = np.genfromtxt(template+'_pix.fits')
-pix_coords[:,0] += x_sh
-pix_coords[:,1] += y_sh
+    pix_coords = np.genfromtxt(template+'_pix.fits')
+    pix_coords[:,0] += x_sh
+    pix_coords[:,1] += y_sh
 
-np.savetxt(template+'_pix.fits',pix_coords)
+    np.savetxt(template+'_pix.fits',pix_coords)
 
 # recenter on seq stars and generate star list for daophot:
 iraf.phot(image=template,coords=template+'_pix.fits',output='default',
@@ -920,11 +979,11 @@ sub0 = sub1[0].data
 ax1.imshow(sub0, origin='lower',cmap='gray',
             vmin=np.mean(tdata[len(tdata)/2/2:3*len(tdata)/2/2,
                 len(tdata)/2/2:3*len(tdata)/2/2])-
-                np.std(tdata[len(tdata)/2/2:3*len(tdata)/2/2,
+                z1*np.std(tdata[len(tdata)/2/2:3*len(tdata)/2/2,
                 len(tdata)/2/2:3*len(tdata)/2/2])*0.5,
             vmax=np.mean(tdata[len(tdata)/2/2:3*len(tdata)/2/2,
                 len(tdata)/2/2:3*len(tdata)/2/2])+
-                np.std(tdata[len(tdata)/2/2:3*len(tdata)/2/2,
+                z2*np.std(tdata[len(tdata)/2/2:3*len(tdata)/2/2,
                 len(tdata)/2/2:3*len(tdata)/2/2]))
 
 
@@ -1049,11 +1108,11 @@ except:
 ax1.imshow(tadata, origin='lower',cmap='gray',
                         vmin=np.mean(tadata[len(tadata)/2/2:3*len(tadata)/2/2,
                             len(tadata)/2/2:3*len(tadata)/2/2])-
-                            np.std(tadata[len(tadata)/2/2:3*len(tadata)/2/2,
+                            z1*np.std(tadata[len(tadata)/2/2:3*len(tadata)/2/2,
                             len(tadata)/2/2:3*len(tadata)/2/2])*0.5,
                         vmax=np.mean(tadata[len(tadata)/2/2:3*len(tadata)/2/2,
                             len(tadata)/2/2:3*len(tadata)/2/2])+
-                            np.std(tadata[len(tadata)/2/2:3*len(tadata)/2/2,
+                            z2*np.std(tadata[len(tadata)/2/2:3*len(tadata)/2/2,
                             len(tadata)/2/2:3*len(tadata)/2/2]))
 
 ax1.set_title('Template aligned to image')
@@ -1308,11 +1367,11 @@ dfdata[np.isnan(dfdata)] = np.median(dfdata[~np.isnan(dfdata)])
 ax1.imshow(dfdata, origin='lower',cmap='gray',
                         vmin=np.mean(dfdata[len(dfdata)/2/2:3*len(dfdata)/2/2,
                             len(dfdata)/2/2:3*len(dfdata)/2/2])-
-                            np.std(dfdata[len(dfdata)/2/2:3*len(dfdata)/2/2,
+                            z1*np.std(dfdata[len(dfdata)/2/2:3*len(dfdata)/2/2,
                             len(dfdata)/2/2:3*len(dfdata)/2/2])*0.5,
                         vmax=np.mean(dfdata[len(dfdata)/2/2:3*len(dfdata)/2/2,
                             len(dfdata)/2/2:3*len(dfdata)/2/2])+
-                            np.std(dfdata[len(dfdata)/2/2:3*len(dfdata)/2/2,
+                            z2*np.std(dfdata[len(dfdata)/2/2:3*len(dfdata)/2/2,
                             len(dfdata)/2/2:3*len(dfdata)/2/2]))
 
 ax1.set_title(label)

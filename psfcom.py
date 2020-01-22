@@ -49,6 +49,7 @@ import matplotlib.pyplot as plt
 from collections import OrderedDict
 from mpl_toolkits.mplot3d import Axes3D
 import argparse
+from matplotlib.patches import Circle
 import requests
 try:
     from queryPS1 import PS1catalog
@@ -159,6 +160,9 @@ parser.add_argument('--magmin', dest='magmin', default=21.5, type=float,
 parser.add_argument('--magmax', dest='magmax', default=16.5, type=float,
                     help='Brightest sequence stars to return from PS1 query ')
 
+parser.add_argument('--shifts', dest='shifts', default=False, action='store_true',
+                    help='Apply manual shifts if WCS is a bit off ')
+
 
 args = parser.parse_args()
 
@@ -174,6 +178,7 @@ z1 = args.z1
 z2 = args.z2
 magmin = args.magmin
 magmax = args.magmax
+shifts = args.shifts
 
 ims = [i for i in args.file_to_reduce]
 
@@ -409,11 +414,11 @@ for image in ims:
         ax1.imshow(data, origin='lower',cmap='gray',
                             vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])-
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])*0.5,
                             vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])+
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2]))
 
     except:
@@ -428,11 +433,11 @@ for image in ims:
         ax1.imshow(data, origin='lower',cmap='gray',
                             vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])-
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])*0.5,
                             vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])+
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2]))
 
 
@@ -477,25 +482,26 @@ for image in ims:
 
 ########### Centering
 
-    # Manual shifts:
-    # Manual shifts:
-    x_sh = raw_input('\n> Add approx pixel shift in x? ['+str(x_sh_1)+']  ')
-    if not x_sh: x_sh = x_sh_1
-    x_sh = int(x_sh)
-    x_sh_1 = x_sh
-
-    y_sh = raw_input('\n> Add approx pixel shift in y? ['+str(y_sh_1)+']  ')
-    if not y_sh: y_sh = y_sh_1
-    y_sh = int(y_sh)
-    y_sh_1 = y_sh
-
     shutil.copy(image+'_pix.fits',image+'_orig_pix.fits')
 
     pix_coords = np.genfromtxt(image+'_pix.fits')
-    pix_coords[:,0] += x_sh
-    pix_coords[:,1] += y_sh
 
-    np.savetxt(image+'_pix.fits',pix_coords)
+    # Manual shifts:
+    if shifts:
+        x_sh = raw_input('\n> Add approx pixel shift in x? ['+str(x_sh_1)+']  ')
+        if not x_sh: x_sh = x_sh_1
+        x_sh = int(x_sh)
+        x_sh_1 = x_sh
+
+        y_sh = raw_input('\n> Add approx pixel shift in y? ['+str(y_sh_1)+']  ')
+        if not y_sh: y_sh = y_sh_1
+        y_sh = int(y_sh)
+        y_sh_1 = y_sh
+
+        pix_coords[:,0] += x_sh
+        pix_coords[:,1] += y_sh
+
+        np.savetxt(image+'_pix.fits',pix_coords)
 
     # recenter on seq stars and generate star list for daophot:
     iraf.phot(image=image,coords=image+'_pix.fits',output='default',
@@ -610,11 +616,11 @@ for i in im_info:
         ax1.imshow(data, origin='lower',cmap='gray',
                             vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])-
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])*0.5,
                             vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])+
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2]))
 
     except:
@@ -629,11 +635,11 @@ for i in im_info:
         ax1.imshow(data, origin='lower',cmap='gray',
                             vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])-
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])*0.5,
                             vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2])+
-                                np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
                                 len(data)/2/2:3*len(data)/2/2]))
 
 
@@ -819,14 +825,14 @@ for i in im_info:
     sub0 = sub1[0].data
 
     ax1.imshow(sub0, origin='lower',cmap='gray',
-                vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                    len(data)/2/2:3*len(data)/2/2])-
-                    np.std(data[len(data)/2/2:3*len(data)/2/2,
-                    len(data)/2/2:3*len(data)/2/2])*0.5,
-                vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                    len(data)/2/2:3*len(data)/2/2])+
-                    np.std(data[len(data)/2/2:3*len(data)/2/2,
-                    len(data)/2/2:3*len(data)/2/2]))
+                            vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
+                                len(data)/2/2:3*len(data)/2/2])-
+                                z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                len(data)/2/2:3*len(data)/2/2])*0.5,
+                            vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
+                                len(data)/2/2:3*len(data)/2/2])+
+                                z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
+                                len(data)/2/2:3*len(data)/2/2]))
 
 
 ########## Zero point from seq stars
@@ -853,13 +859,14 @@ for i in im_info:
         checkMags = np.abs(seqIm+zp1-seqMags[filtername][mask])<errzp1*sigClip
 
         print 'Rejecting stars from ZP: '
-        print np.arange(len(seqDat))[~checkMags]+1
+        print seqIm1[:,0][~checkMags]
         print 'ZPs:'
         print seqMags[filtername][mask][~checkMags]-seqIm[~checkMags]
 
+        zpList = seqMags[filtername][mask][checkMags]-seqIm[checkMags]
 
-        ZP = np.mean(seqMags[filtername][mask][checkMags]-seqIm[checkMags])
-        errZP = np.std(seqMags[filtername][mask][checkMags]-seqIm[checkMags])
+        ZP = np.mean(zpList)
+        errZP = np.std(zpList)
 
         print 'Zeropoint = %.3f +/- %.3f\n' %(ZP,errZP)
 
@@ -911,35 +918,51 @@ for i in im_info:
                                 int(SNco[1])-100:int(SNco[1])+100]))
 
 
-        ax4.set_xlim(SNco[0]-100,SNco[0]+100)
-        ax4.set_ylim(SNco[1]-100,SNco[1]+100)
+        ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
+        ax4.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
 
         ax4.get_yaxis().set_visible(False)
         ax4.get_xaxis().set_visible(False)
 
         ax4.set_title('Supernova')
 
+        apcircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+                edgecolor='r', linewidth=3, alpha=1)
+        ax4.add_patch(apcircle)
+
+        skycircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+                edgecolor='r', linewidth=3, alpha=1)
+        ax4.add_patch(skycircle)
+
 
         ax5 = plt.subplot2grid((2,4),(1,3))
 
         ax5.imshow(sub, origin='lower',cmap='gray',
-                    vmin=np.mean(sub[SNco[0]-100:SNco[0]+100,
-                                SNco[1]-100:SNco[1]+100])-
-                            np.std(sub[SNco[0]-100:SNco[0]+100,
-                                SNco[1]-100:SNco[1]+100]),
-                    vmax=np.mean(sub[SNco[0]-100:SNco[0]+100,
-                                SNco[1]-100:SNco[1]+100])+
-                            np.std(sub[SNco[0]-100:SNco[0]+100,
-                                SNco[1]-100:SNco[1]+100]))
+                    vmin=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
+                                int(SNco[1])-100:int(SNco[1])+100])-
+                            z1*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
+                                int(SNco[1])-100:int(SNco[1])+100]),
+                    vmax=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
+                                int(SNco[1])-100:int(SNco[1])+100])+
+                            z2*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
+                                int(SNco[1])-100:int(SNco[1])+100]))
 
 
-        ax5.set_xlim(SNco[0]-100,SNco[0]+100)
-        ax5.set_ylim(SNco[1]-100,SNco[1]+100)
+        ax5.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
+        ax5.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
 
         ax5.get_yaxis().set_visible(False)
         ax5.get_xaxis().set_visible(False)
 
         ax5.set_title('Subtracted image')
+
+        apcircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+                edgecolor='r', linewidth=3, alpha=1)
+        ax5.add_patch(apcircle)
+
+        skycircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+                edgecolor='r', linewidth=3, alpha=1)
+        ax5.add_patch(skycircle)
 
         plt.draw()
 

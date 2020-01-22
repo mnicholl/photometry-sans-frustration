@@ -209,7 +209,7 @@ def PS1cutouts(ra,dec,filt):
     ps1_im = requests.get(ps1_url)
 
     try:
-        image_name = ps1_im.text.split()[16]
+        image_name = ps1_im.text.split()[17]
 
         print('Image found: ' + image_name + '\n')
 

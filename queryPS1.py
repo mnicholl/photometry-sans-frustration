@@ -11,15 +11,16 @@ import glob
 import sys
 import os
 
+# Note: increased search radius and max_records for UKIRT WFCAM but may want to decrease if it gets too slow
 
 def PS1catalog(ra,dec,magmin,magmax):
 
     queryurl = 'https://archive.stsci.edu/panstarrs/search.php?'
     queryurl += 'RA='+str(ra)
     queryurl += '&DEC='+str(dec)
-    queryurl += '&SR=0.083&selectedColumnsCsv=ndetections,raMean,decMean,'
+    queryurl += '&SR=0.12&selectedColumnsCsv=ndetections,raMean,decMean,'
     queryurl += 'gMeanPSFMag,rMeanPSFMag,iMeanPSFMag,zMeanPSFMag,yMeanPSFMag,iMeanKronMag'
-    queryurl += '&ordercolumn1=ndetections&descending1=on&max_records=200'
+    queryurl += '&ordercolumn1=ndetections&descending1=on&max_records=300'
 
     print '\nQuerying PS1 for reference stars via MAST...\n'
 
@@ -75,7 +76,7 @@ def PS1catalog(ra,dec,magmin,magmax):
 
 
 
-def PS1cutouts(ra,dec,filt):
+def PS1cutouts(ra,dec,filt,size=2500):
 
     print '\nSearching for PS1 images of field...\n'
 
@@ -92,8 +93,9 @@ def PS1cutouts(ra,dec,filt):
 
         print 'Image found: ' + image_name + '\n'
 
-        cutout_url = 'http://ps1images.stsci.edu/cgi-bin/fitscut.cgi?&filetypes=stack&size=2500'
+        cutout_url = 'http://ps1images.stsci.edu/cgi-bin/fitscut.cgi?&filetypes=stack'
 
+        cutout_url += '&size='+str(size)
         cutout_url += '&ra='+str(ra)
         cutout_url += '&dec='+str(dec)
         cutout_url += '&filters='+filt
