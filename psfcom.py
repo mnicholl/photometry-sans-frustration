@@ -238,19 +238,19 @@ filtAll = 'ugrizUBVRIJHK'
 
 
 
-
-outdir = 'PSF_output_'+str(len(glob.glob('PSF_phot_*')))
-
-if not os.path.exists(outdir): os.makedirs(outdir)
-
-
-outFile = open('PSF_phot_'+str(len(glob.glob('PSF_phot_*')))+'.txt','w')
-
-ZPfile = open(os.path.join(outdir,'zeropoints.txt'),'w')
-
-
-outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tcomments')
-
+#
+# outdir = 'PSF_output_'+str(len(glob.glob('PSF_phot_*')))
+#
+# if not os.path.exists(outdir): os.makedirs(outdir)
+#
+#
+# outFile = open('PSF_phot_'+str(len(glob.glob('PSF_phot_*')))+'.txt','w')
+#
+# ZPfile = open(os.path.join(outdir,'zeropoints.txt'),'w')
+#
+#
+# outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tcomments')
+#
 
 
 plt.figure(1,(14,7))
@@ -580,486 +580,488 @@ for i in im_info:
 
 ######################################
 
-
-for i in im_info:
-
-    filtername = i
-
-    image = 'stack_'+im_info[i]['refim']
-
-    mjd = im_info[i]['mjd']
-
-    print '\n#########\nDo photometry on stacks\n#########\n'
-
-
-    print '\n#########\n'+filtername+'-band\n#########\n'
-
-
-
-    plt.clf()
-
-    plt.subplots_adjust(left=0.05,right=0.99,top=0.99,bottom=-0.05)
-
-########## plot data
-
-    ax1 = plt.subplot2grid((2,4),(0,0),colspan=2,rowspan=2)
-
-    try:
-        im = pyfits.open(image)
-
-        im[0].verify('fix')
-
-        data = im[0].data
-
-        header = im[0].header
-
-        ax1.imshow(data, origin='lower',cmap='gray',
-                            vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])-
-                                z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])*0.5,
-                            vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])+
-                                z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2]))
-
-    except:
-        im = pyfits.open(image)
-
-        im[1].verify('fix')
-
-        data = im[1].data
-
-        header = im[1].header
-
-        ax1.imshow(data, origin='lower',cmap='gray',
-                            vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])-
-                                z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])*0.5,
-                            vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])+
-                                z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2]))
-
-
-    ax1.set_title(image)
-
-
-    ax1.set_xlim(0,len(data))
-
-    ax1.set_ylim(0,len(data))
-
-    ax1.get_yaxis().set_visible(False)
-    ax1.get_xaxis().set_visible(False)
-
-    plt.draw()
-
-    iraf.wcsctran(input='coords',output=image+'_pix.fits',image=image,
-                    inwcs='world',outwcs='logical')
-
-    co = np.genfromtxt(image+'_pix.fits')
-
-
-    ax1.errorbar(co[:,0],co[:,1],fmt='o',mfc='none',markeredgewidth=3,
-                    markersize=20,label='Sequence stars')
-
-
-    for j in range(len(co)):
-       ax1.text(co[j,0]+20,co[j,1]-20,str(j+1))
-
-
-
-    iraf.wcsctran(input=snFile,output=image+'_SNpix.fits',image=image,
-                    inwcs='world',outwcs='logical')
-
-    SNco = np.genfromtxt(image+'_SNpix.fits')
-
-
-    ax1.errorbar(SNco[0],SNco[1],fmt='o',markeredgecolor='r',mfc='none',
-                    markeredgewidth=5,markersize=25)
-
-    ax1.text(SNco[0]+30,SNco[1]+30,'SN',color='r')
-
-
-########### Centering
-
-    # Manual shifts:
-    # Manual shifts:
-    x_sh = raw_input('\n> Add approx pixel shift in x? ['+str(x_sh_1)+']  ')
-    if not x_sh: x_sh = x_sh_1
-    x_sh = int(x_sh)
-    x_sh_1 = x_sh
-
-    y_sh = raw_input('\n> Add approx pixel shift in y? ['+str(y_sh_1)+']  ')
-    if not y_sh: y_sh = y_sh_1
-    y_sh = int(y_sh)
-    y_sh_1 = y_sh
-
-    shutil.copy(image+'_pix.fits',image+'_orig_pix.fits')
-
-    pix_coords = np.genfromtxt(image+'_pix.fits')
-    pix_coords[:,0] += x_sh
-    pix_coords[:,1] += y_sh
-
-    np.savetxt(image+'_pix.fits',pix_coords)
-
-    # recenter on seq stars and generate star list for daophot:
-    iraf.phot(image=image,coords=image+'_pix.fits',output='default',
-                    interactive='no',verify='no',wcsin='logical',verbose='yes',
-                    Stdout='phot_out.txt')
-
-
-    cent = np.genfromtxt('phot_out.txt')
-
-    ax1.errorbar(cent[:,1],cent[:,2],fmt='s',mfc='none',markeredgecolor='b',
-                    markersize=10,markeredgewidth=1.5,label='Recentered',
-                    zorder=6)
-
-    plt.show()
-
-    orig_co = np.genfromtxt(image+'_orig_pix.fits')
-
-    del_x = np.mean(cent[:,1]-orig_co[:,0])
-    del_y = np.mean(cent[:,2]-orig_co[:,1])
-
-
-
-########### Build PSF
-
-    daophot.pstselect(image=image,photfile='default',pstfile='default',
-                        maxnpsf=nPSF,verify='no')
-
-    ax2 = plt.subplot2grid((2,4),(0,2))
-
-
-    happy = 'n'
-    j = 1
-    rmStar = 1000
-    while happy!='y':
-
-        daophot.pselect(infiles=image+'.pst.'+str(j),
-                        outfiles=image+'.pst.'+str(j+1),
-                        expr='ID!='+str(rmStar))
-
-        daophot.psf(image=image,photfile='default',pstfile='default',
-                    psfimage='default',opstfile='default',groupfil='default',
-                    verify='no',interactive='no')
-
-        iraf.txdump(textfile=image+'.pst.'+str(j+1),fields='ID',expr='yes',
-                    Stdout=os.path.join(outdir,image+'_psf_stars.txt'))
-
-        psfList = np.genfromtxt(os.path.join(outdir,image+'_psf_stars.txt'),
-                                dtype='int')
-
-        for k in psfList:
-            ax1.errorbar(co[k-1,0],co[k-1,1],fmt='*',mfc='none',
-                            markeredgecolor='lime',markeredgewidth=2,
-                            markersize=30,label='Used in PSF fit')
-
-        # This doesn't remove stars from plot - need to give some thought!!!
-
-        handles, labels = ax1.get_legend_handles_labels()
-        by_label = OrderedDict(zip(labels, handles))
-        ax1.legend(by_label.values(), by_label.keys(),
-                    numpoints=1,prop={'size':16}, handletextpad=0.5,
-                    labelspacing=0.5, borderaxespad=1, ncol=3,
-                    bbox_to_anchor=(1, 1.2))
-
-        daophot.seepsf(psfimage=image+'.psf.'+str(j)+'.fits',
-                        image=os.path.join(outdir,image+'_psf.fits'))
-
-        psfIm = pyfits.open(os.path.join(outdir,image+'_psf.fits'))
-
-        psfIm[0].verify('fix')
-
-        psf = psfIm[0].data
-
-
-#        plt.clf()
-
-
-        ax2.imshow(psf, origin='lower',cmap='gray',
-                    vmin=np.mean(psf)-np.std(psf)*1.,
-                    vmax=np.mean(psf)+np.std(psf)*3.)
-
-        ax2.get_yaxis().set_visible(False)
-        ax2.get_xaxis().set_visible(False)
-
-        ax2.set_title('PSF')
-
-
-        ax3 = plt.subplot2grid((2,4),(0,3),projection='3d')
-
-        tmpArr = range(len(psf))
-
-        X, Y = np.meshgrid(tmpArr,tmpArr)
-
-        ax3.plot_surface(X,Y,psf,rstride=1,cstride=1,cmap='hot',alpha=0.5)
-
-        ax3.set_zlim(np.min(psf),np.max(psf)*1.1)
-
-        ax3.set_axis_off()
-
-        plt.draw()
-
-
-        happy = raw_input('\n> Happy with PSF? [y]')
-
-        if not happy: happy = 'y'
-
-        if happy != 'y':
-            rmStar = raw_input('Star to remove: ')
-            j+=1
-            os.remove(os.path.join(outdir,image+'_psf.fits'))
-
-
-    daophot.allstar(image=image,photfile='default',psfimage='default',
-                    allstarfile='default',rejfile='default',subimage='default',
-                    verify='no',verbose='yes',fitsky='yes')
-
-    sub1 = pyfits.open(image+'.sub.1.fits')
-
-    sub1[0].verify('fix')
-
-    sub0 = sub1[0].data
-
-    ax1.imshow(sub0, origin='lower',cmap='gray',
-                            vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])-
-                                z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])*0.5,
-                            vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2])+
-                                z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
-                                len(data)/2/2:3*len(data)/2/2]))
-
-
-########## Zero point from seq stars
-
-    if filtername in seqMags:
-
-        iraf.txdump(textfile=image+'.als.1',fields='ID,MAG,MERR',expr='yes',
-                    Stdout=os.path.join(outdir,image+'_seqMags.txt'))
-
-        seqIm1 = np.genfromtxt(os.path.join(outdir,image+'_seqMags.txt'))
-        seqIm1 = seqIm1[seqIm1[:,0].argsort()]
-        mask = np.array(seqIm1[:,0],dtype=int)[~np.isnan(seqIm1[:,1])]-1
-        seqIm = seqIm1[:,1]
-        seqErr = seqIm1[:,2]
-
-
-        zp1 = np.mean(seqMags[filtername][mask]-seqIm)
-        errzp1 = np.std(seqMags[filtername][mask]-seqIm)
-
-        print 'Initial zeropoint =  %.3f +/- %.3f\n' %(zp1,errzp1)
-
-
-
-        checkMags = np.abs(seqIm+zp1-seqMags[filtername][mask])<errzp1*sigClip
-
-        print 'Rejecting stars from ZP: '
-        print seqIm1[:,0][~checkMags]
-        print 'ZPs:'
-        print seqMags[filtername][mask][~checkMags]-seqIm[~checkMags]
-
-        zpList = seqMags[filtername][mask][checkMags]-seqIm[checkMags]
-
-        ZP = np.mean(zpList)
-        errZP = np.std(zpList)
-
-        print 'Zeropoint = %.3f +/- %.3f\n' %(ZP,errZP)
-
-        ZPfile.write(image+'\t'+filtername+'\t%.2f\t%.2f\t%.2f\n' %(mjd,ZP,errZP))
-
-
-
-
-########### SN photometry
-
-
-    SNco[0] += del_x
-    SNco[1] += del_y
-
-    iraf.centerpars.cbox = recen_rad_sn
-
-    recen_rad_1 = recen_rad_sn
-
-    np.savetxt(image+'_SNpix_sh.fits',SNco.reshape(1,2),fmt='%.6f')
-
-    recen = 'y'
-    j = 1
-    while recen!='n':
-
-        iraf.phot(image=image,coords=image+'_SNpix_sh.fits',output='default',
-                    interactive='no',verify='no',wcsin='logical',verbose='yes')
-
-        daophot.allstar(image=image,photfile=image+'.mag.'+str(j+1),
-                        psfimage='default',allstarfile='default',
-                        rejfile='default',subimage='default',verify='no',
-                        verbose='yes',fitsky='yes',recenter='no')
-
-        sub1 = pyfits.open(image+'.sub.'+str(j+1)+'.fits')
-
-        sub1[0].verify('fix')
-
-        sub = sub1[0].data
-
-        ax4 = plt.subplot2grid((2,4),(1,2))
-
-        ax4.imshow(data, origin='lower',cmap='gray',
-                    vmin=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
-                                int(SNco[1])-100:int(SNco[1])+100])-
-                            z1*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
-                                int(SNco[1])-100:int(SNco[1])+100]),
-                    vmax=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
-                                int(SNco[1])-100:int(SNco[1])+100])+
-                            z2*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
-                                int(SNco[1])-100:int(SNco[1])+100]))
-
-
-        ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
-        ax4.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
-
-        ax4.get_yaxis().set_visible(False)
-        ax4.get_xaxis().set_visible(False)
-
-        ax4.set_title('Supernova')
-
-        apcircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
-                edgecolor='r', linewidth=3, alpha=1)
-        ax4.add_patch(apcircle)
-
-        skycircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
-                edgecolor='r', linewidth=3, alpha=1)
-        ax4.add_patch(skycircle)
-
-
-        ax5 = plt.subplot2grid((2,4),(1,3))
-
-        ax5.imshow(sub, origin='lower',cmap='gray',
-                    vmin=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
-                                int(SNco[1])-100:int(SNco[1])+100])-
-                            z1*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
-                                int(SNco[1])-100:int(SNco[1])+100]),
-                    vmax=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
-                                int(SNco[1])-100:int(SNco[1])+100])+
-                            z2*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
-                                int(SNco[1])-100:int(SNco[1])+100]))
-
-
-        ax5.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
-        ax5.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
-
-        ax5.get_yaxis().set_visible(False)
-        ax5.get_xaxis().set_visible(False)
-
-        ax5.set_title('Subtracted image')
-
-        apcircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
-                edgecolor='r', linewidth=3, alpha=1)
-        ax5.add_patch(apcircle)
-
-        skycircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
-                edgecolor='r', linewidth=3, alpha=1)
-        ax5.add_patch(skycircle)
-
-        plt.draw()
-
-
-        recen = raw_input('\n> Adjust recentering radius? [n]  ')
-
-        if not recen: recen = 'n'
-
-        if recen!= 'n':
-            recen_rad = raw_input('\n> Enter radius ['+str(recen_rad_1)+']  ')
-            if not recen_rad: recen_rad = recen_rad_1
-            recen_rad = int(recen_rad)
-            iraf.centerpars.cbox = recen_rad
-            recen_rad_1 = recen_rad
-            j += 1
-
-
-
-    iraf.txdump(textfile=image+'.mag.'+str(j+1),fields='MAG,MERR',expr='yes',
-                Stdout=os.path.join(outdir,image+'_SN_ap.txt'))
-
-    iraf.txdump(textfile=image+'.als.'+str(j+1),fields='MAG,MERR',expr='yes',
-                Stdout=os.path.join(outdir,image+'_SN_dao.txt'))
-
-
-    apmag = np.genfromtxt(os.path.join(outdir,image+'_SN_ap.txt'))
-
-    SNap = apmag[0]
-    errSNap = apmag[1]
-
-    daomag = np.genfromtxt(os.path.join(outdir,image+'_SN_dao.txt'))
-
-    try:
-        SNdao = daomag[0]
-        errSNdao = daomag[1]
-    except:
-        print 'PSF could not be fit, using aperture mag'
-        SNdao = np.nan
-        errSNdao = np.nan
-
-
-    print '\n'
-
-    if filtername in seqMags:
-
-        calMagsDao = SNdao + ZP
-
-        errMagDao = np.sqrt(errSNdao**2 + errZP**2)
-
-
-        calMagsAp = SNap + ZP
-
-        errMagAp = np.sqrt(errSNap**2 + errZP**2)
-
-    else:
-        calMagsDao = SNdao
-
-        errMagDao = errSNdao
-
-
-        calMagsAp = SNap
-
-        errMagAp = errSNap
-
-        comment1 = 'No ZP - instrumental mag only'
-
-        print '> No ZP - instrumental mag only!!!'
-
-
-
-    print '> PSF mag = '+'%.2f +/- %.2f' %(calMagsDao,errMagDao)
-    print '> Aperture mag = '+'%.2f +/- %.2f' %(calMagsAp,errMagAp)
-
-
-    comment = raw_input('\n> Add comment to output file: ')
-
-    if comment1:
-        comment += (' // '+comment1)
-
-    outFile.write('\n'+image+'\t'+filtername+'\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t'
-                    %(mjd,calMagsDao,errMagDao,calMagsAp,errMagAp))
-    outFile.write(comment)
-
-
-outFile.close()
-
-ZPfile.close()
-
-
+#
+# for i in im_info:
+#
+#     filtername = i
+#
+#     image = 'stack_'+im_info[i]['refim']
+#
+#     mjd = im_info[i]['mjd']
+#
+#     print '\n#########\nDo photometry on stacks\n#########\n'
+#
+#
+#     print '\n#########\n'+filtername+'-band\n#########\n'
+#
+#
+#
+#     plt.clf()
+#
+#     plt.subplots_adjust(left=0.05,right=0.99,top=0.99,bottom=-0.05)
+#
+# ########## plot data
+#
+#     ax1 = plt.subplot2grid((2,4),(0,0),colspan=2,rowspan=2)
+#
+#     try:
+#         im = pyfits.open(image)
+#
+#         im[0].verify('fix')
+#
+#         data = im[0].data
+#
+#         header = im[0].header
+#
+#         ax1.imshow(data, origin='lower',cmap='gray',
+#                             vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
+#                                 len(data)/2/2:3*len(data)/2/2])-
+#                                 z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
+#                                 len(data)/2/2:3*len(data)/2/2])*0.5,
+#                             vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
+#                                 len(data)/2/2:3*len(data)/2/2])+
+#                                 z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
+#                                 len(data)/2/2:3*len(data)/2/2]))
+#
+#     except:
+#         im = pyfits.open(image)
+#
+#         im[1].verify('fix')
+#
+#         data = im[1].data
+#
+#         header = im[1].header
+#
+#         ax1.imshow(data, origin='lower',cmap='gray',
+#                             vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
+#                                 len(data)/2/2:3*len(data)/2/2])-
+#                                 z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
+#                                 len(data)/2/2:3*len(data)/2/2])*0.5,
+#                             vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
+#                                 len(data)/2/2:3*len(data)/2/2])+
+#                                 z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
+#                                 len(data)/2/2:3*len(data)/2/2]))
+#
+#
+#     ax1.set_title(image)
+#
+#
+#     ax1.set_xlim(0,len(data))
+#
+#     ax1.set_ylim(0,len(data))
+#
+#     ax1.get_yaxis().set_visible(False)
+#     ax1.get_xaxis().set_visible(False)
+#
+#     plt.draw()
+#
+#     iraf.wcsctran(input='coords',output=image+'_pix.fits',image=image,
+#                     inwcs='world',outwcs='logical')
+#
+#     co = np.genfromtxt(image+'_pix.fits')
+#
+#
+#     ax1.errorbar(co[:,0],co[:,1],fmt='o',mfc='none',markeredgewidth=3,
+#                     markersize=20,label='Sequence stars')
+#
+#
+#     for j in range(len(co)):
+#        ax1.text(co[j,0]+20,co[j,1]-20,str(j+1))
+#
+#
+#
+#     iraf.wcsctran(input=snFile,output=image+'_SNpix.fits',image=image,
+#                     inwcs='world',outwcs='logical')
+#
+#     SNco = np.genfromtxt(image+'_SNpix.fits')
+#
+#
+#     ax1.errorbar(SNco[0],SNco[1],fmt='o',markeredgecolor='r',mfc='none',
+#                     markeredgewidth=5,markersize=25)
+#
+#     ax1.text(SNco[0]+30,SNco[1]+30,'SN',color='r')
+#
+#
+# ########### Centering
+#
+#     # Manual shifts:
+#     shutil.copy(image+'_pix.fits',image+'_orig_pix.fits')
+#
+#     pix_coords = np.genfromtxt(image+'_pix.fits')
+#
+#     # Manual shifts:
+#     if shifts:
+#         x_sh = raw_input('\n> Add approx pixel shift in x? ['+str(x_sh_1)+']  ')
+#         if not x_sh: x_sh = x_sh_1
+#         x_sh = int(x_sh)
+#         x_sh_1 = x_sh
+#
+#         y_sh = raw_input('\n> Add approx pixel shift in y? ['+str(y_sh_1)+']  ')
+#         if not y_sh: y_sh = y_sh_1
+#         y_sh = int(y_sh)
+#         y_sh_1 = y_sh
+#
+#         pix_coords[:,0] += x_sh
+#         pix_coords[:,1] += y_sh
+#
+#         np.savetxt(image+'_pix.fits',pix_coords)
+#
+#     # recenter on seq stars and generate star list for daophot:
+#     iraf.phot(image=image,coords=image+'_pix.fits',output='default',
+#                     interactive='no',verify='no',wcsin='logical',verbose='yes',
+#                     Stdout='phot_out.txt')
+#
+#
+#     cent = np.genfromtxt('phot_out.txt')
+#
+#     ax1.errorbar(cent[:,1],cent[:,2],fmt='s',mfc='none',markeredgecolor='b',
+#                     markersize=10,markeredgewidth=1.5,label='Recentered',
+#                     zorder=6)
+#
+#     plt.show()
+#
+#     orig_co = np.genfromtxt(image+'_orig_pix.fits')
+#
+#     del_x = np.mean(cent[:,1]-orig_co[:,0])
+#     del_y = np.mean(cent[:,2]-orig_co[:,1])
+#
+#
+#
+# ########### Build PSF
+#
+#     daophot.pstselect(image=image,photfile='default',pstfile='default',
+#                         maxnpsf=nPSF,verify='no')
+#
+#     ax2 = plt.subplot2grid((2,4),(0,2))
+#
+#
+#     happy = 'n'
+#     j = 1
+#     rmStar = 1000
+#     while happy!='y':
+#
+#         daophot.pselect(infiles=image+'.pst.'+str(j),
+#                         outfiles=image+'.pst.'+str(j+1),
+#                         expr='ID!='+str(rmStar))
+#
+#         daophot.psf(image=image,photfile='default',pstfile='default',
+#                     psfimage='default',opstfile='default',groupfil='default',
+#                     verify='no',interactive='no')
+#
+#         iraf.txdump(textfile=image+'.pst.'+str(j+1),fields='ID',expr='yes',
+#                     Stdout=os.path.join(outdir,image+'_psf_stars.txt'))
+#
+#         psfList = np.genfromtxt(os.path.join(outdir,image+'_psf_stars.txt'),
+#                                 dtype='int')
+#
+#         for k in psfList:
+#             ax1.errorbar(co[k-1,0],co[k-1,1],fmt='*',mfc='none',
+#                             markeredgecolor='lime',markeredgewidth=2,
+#                             markersize=30,label='Used in PSF fit')
+#
+#         # This doesn't remove stars from plot - need to give some thought!!!
+#
+#         handles, labels = ax1.get_legend_handles_labels()
+#         by_label = OrderedDict(zip(labels, handles))
+#         ax1.legend(by_label.values(), by_label.keys(),
+#                     numpoints=1,prop={'size':16}, handletextpad=0.5,
+#                     labelspacing=0.5, borderaxespad=1, ncol=3,
+#                     bbox_to_anchor=(1, 1.2))
+#
+#         daophot.seepsf(psfimage=image+'.psf.'+str(j)+'.fits',
+#                         image=os.path.join(outdir,image+'_psf.fits'))
+#
+#         psfIm = pyfits.open(os.path.join(outdir,image+'_psf.fits'))
+#
+#         psfIm[0].verify('fix')
+#
+#         psf = psfIm[0].data
+#
+#
+# #        plt.clf()
+#
+#
+#         ax2.imshow(psf, origin='lower',cmap='gray',
+#                     vmin=np.mean(psf)-np.std(psf)*1.,
+#                     vmax=np.mean(psf)+np.std(psf)*3.)
+#
+#         ax2.get_yaxis().set_visible(False)
+#         ax2.get_xaxis().set_visible(False)
+#
+#         ax2.set_title('PSF')
+#
+#
+#         ax3 = plt.subplot2grid((2,4),(0,3),projection='3d')
+#
+#         tmpArr = range(len(psf))
+#
+#         X, Y = np.meshgrid(tmpArr,tmpArr)
+#
+#         ax3.plot_surface(X,Y,psf,rstride=1,cstride=1,cmap='hot',alpha=0.5)
+#
+#         ax3.set_zlim(np.min(psf),np.max(psf)*1.1)
+#
+#         ax3.set_axis_off()
+#
+#         plt.draw()
+#
+#
+#         happy = raw_input('\n> Happy with PSF? [y]')
+#
+#         if not happy: happy = 'y'
+#
+#         if happy != 'y':
+#             rmStar = raw_input('Star to remove: ')
+#             j+=1
+#             os.remove(os.path.join(outdir,image+'_psf.fits'))
+#
+#
+#     daophot.allstar(image=image,photfile='default',psfimage='default',
+#                     allstarfile='default',rejfile='default',subimage='default',
+#                     verify='no',verbose='yes',fitsky='yes')
+#
+#     sub1 = pyfits.open(image+'.sub.1.fits')
+#
+#     sub1[0].verify('fix')
+#
+#     sub0 = sub1[0].data
+#
+#     ax1.imshow(sub0, origin='lower',cmap='gray',
+#                             vmin=np.mean(data[len(data)/2/2:3*len(data)/2/2,
+#                                 len(data)/2/2:3*len(data)/2/2])-
+#                                 z1*np.std(data[len(data)/2/2:3*len(data)/2/2,
+#                                 len(data)/2/2:3*len(data)/2/2])*0.5,
+#                             vmax=np.mean(data[len(data)/2/2:3*len(data)/2/2,
+#                                 len(data)/2/2:3*len(data)/2/2])+
+#                                 z2*np.std(data[len(data)/2/2:3*len(data)/2/2,
+#                                 len(data)/2/2:3*len(data)/2/2]))
+#
+#
+# ########## Zero point from seq stars
+#
+#     if filtername in seqMags:
+#
+#         iraf.txdump(textfile=image+'.als.1',fields='ID,MAG,MERR',expr='yes',
+#                     Stdout=os.path.join(outdir,image+'_seqMags.txt'))
+#
+#         seqIm1 = np.genfromtxt(os.path.join(outdir,image+'_seqMags.txt'))
+#         seqIm1 = seqIm1[seqIm1[:,0].argsort()]
+#         mask = np.array(seqIm1[:,0],dtype=int)[~np.isnan(seqIm1[:,1])]-1
+#         seqIm = seqIm1[:,1]
+#         seqErr = seqIm1[:,2]
+#
+#
+#         zp1 = np.mean(seqMags[filtername][mask]-seqIm)
+#         errzp1 = np.std(seqMags[filtername][mask]-seqIm)
+#
+#         print 'Initial zeropoint =  %.3f +/- %.3f\n' %(zp1,errzp1)
+#
+#
+#
+#         checkMags = np.abs(seqIm+zp1-seqMags[filtername][mask])<errzp1*sigClip
+#
+#         print 'Rejecting stars from ZP: '
+#         print seqIm1[:,0][~checkMags]
+#         print 'ZPs:'
+#         print seqMags[filtername][mask][~checkMags]-seqIm[~checkMags]
+#
+#         zpList = seqMags[filtername][mask][checkMags]-seqIm[checkMags]
+#
+#         ZP = np.mean(zpList)
+#         errZP = np.std(zpList)
+#
+#         print 'Zeropoint = %.3f +/- %.3f\n' %(ZP,errZP)
+#
+#         ZPfile.write(image+'\t'+filtername+'\t%.2f\t%.2f\t%.2f\n' %(mjd,ZP,errZP))
+#
+#
+#
+#
+# ########### SN photometry
+#
+#
+#     SNco[0] += del_x
+#     SNco[1] += del_y
+#
+#     iraf.centerpars.cbox = recen_rad_sn
+#
+#     recen_rad_1 = recen_rad_sn
+#
+#     np.savetxt(image+'_SNpix_sh.fits',SNco.reshape(1,2),fmt='%.6f')
+#
+#     recen = 'y'
+#     j = 1
+#     while recen!='n':
+#
+#         iraf.phot(image=image,coords=image+'_SNpix_sh.fits',output='default',
+#                     interactive='no',verify='no',wcsin='logical',verbose='yes')
+#
+#         daophot.allstar(image=image,photfile=image+'.mag.'+str(j+1),
+#                         psfimage='default',allstarfile='default',
+#                         rejfile='default',subimage='default',verify='no',
+#                         verbose='yes',fitsky='yes',recenter='no')
+#
+#         sub1 = pyfits.open(image+'.sub.'+str(j+1)+'.fits')
+#
+#         sub1[0].verify('fix')
+#
+#         sub = sub1[0].data
+#
+#         ax4 = plt.subplot2grid((2,4),(1,2))
+#
+#         ax4.imshow(data, origin='lower',cmap='gray',
+#                     vmin=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
+#                                 int(SNco[1])-100:int(SNco[1])+100])-
+#                             z1*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
+#                                 int(SNco[1])-100:int(SNco[1])+100]),
+#                     vmax=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
+#                                 int(SNco[1])-100:int(SNco[1])+100])+
+#                             z2*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
+#                                 int(SNco[1])-100:int(SNco[1])+100]))
+#
+#
+#         ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
+#         ax4.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
+#
+#         ax4.get_yaxis().set_visible(False)
+#         ax4.get_xaxis().set_visible(False)
+#
+#         ax4.set_title('Supernova')
+#
+#         apcircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+#                 edgecolor='r', linewidth=3, alpha=1)
+#         ax4.add_patch(apcircle)
+#
+#         skycircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+#                 edgecolor='r', linewidth=3, alpha=1)
+#         ax4.add_patch(skycircle)
+#
+#
+#         ax5 = plt.subplot2grid((2,4),(1,3))
+#
+#         ax5.imshow(sub, origin='lower',cmap='gray',
+#                     vmin=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
+#                                 int(SNco[1])-100:int(SNco[1])+100])-
+#                             z1*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
+#                                 int(SNco[1])-100:int(SNco[1])+100]),
+#                     vmax=np.mean(data[int(SNco[0])-100:int(SNco[0])+100,
+#                                 int(SNco[1])-100:int(SNco[1])+100])+
+#                             z2*np.std(data[int(SNco[0])-100:int(SNco[0])+100,
+#                                 int(SNco[1])-100:int(SNco[1])+100]))
+#
+#
+#         ax5.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
+#         ax5.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
+#
+#         ax5.get_yaxis().set_visible(False)
+#         ax5.get_xaxis().set_visible(False)
+#
+#         ax5.set_title('Subtracted image')
+#
+#         apcircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+#                 edgecolor='r', linewidth=3, alpha=1)
+#         ax5.add_patch(apcircle)
+#
+#         skycircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+#                 edgecolor='r', linewidth=3, alpha=1)
+#         ax5.add_patch(skycircle)
+#
+#         plt.draw()
+#
+#
+#         recen = raw_input('\n> Adjust recentering radius? [n]  ')
+#
+#         if not recen: recen = 'n'
+#
+#         if recen!= 'n':
+#             recen_rad = raw_input('\n> Enter radius ['+str(recen_rad_1)+']  ')
+#             if not recen_rad: recen_rad = recen_rad_1
+#             recen_rad = int(recen_rad)
+#             iraf.centerpars.cbox = recen_rad
+#             recen_rad_1 = recen_rad
+#             j += 1
+#
+#
+#
+#     iraf.txdump(textfile=image+'.mag.'+str(j+1),fields='MAG,MERR',expr='yes',
+#                 Stdout=os.path.join(outdir,image+'_SN_ap.txt'))
+#
+#     iraf.txdump(textfile=image+'.als.'+str(j+1),fields='MAG,MERR',expr='yes',
+#                 Stdout=os.path.join(outdir,image+'_SN_dao.txt'))
+#
+#
+#     apmag = np.genfromtxt(os.path.join(outdir,image+'_SN_ap.txt'))
+#
+#     SNap = apmag[0]
+#     errSNap = apmag[1]
+#
+#     daomag = np.genfromtxt(os.path.join(outdir,image+'_SN_dao.txt'))
+#
+#     try:
+#         SNdao = daomag[0]
+#         errSNdao = daomag[1]
+#     except:
+#         print 'PSF could not be fit, using aperture mag'
+#         SNdao = np.nan
+#         errSNdao = np.nan
+#
+#
+#     print '\n'
+#
+#     if filtername in seqMags:
+#
+#         calMagsDao = SNdao + ZP
+#
+#         errMagDao = np.sqrt(errSNdao**2 + errZP**2)
+#
+#
+#         calMagsAp = SNap + ZP
+#
+#         errMagAp = np.sqrt(errSNap**2 + errZP**2)
+#
+#     else:
+#         calMagsDao = SNdao
+#
+#         errMagDao = errSNdao
+#
+#
+#         calMagsAp = SNap
+#
+#         errMagAp = errSNap
+#
+#         comment1 = 'No ZP - instrumental mag only'
+#
+#         print '> No ZP - instrumental mag only!!!'
+#
+#
+#
+#     print '> PSF mag = '+'%.2f +/- %.2f' %(calMagsDao,errMagDao)
+#     print '> Aperture mag = '+'%.2f +/- %.2f' %(calMagsAp,errMagAp)
+#
+#
+#     comment = raw_input('\n> Add comment to output file: ')
+#
+#     if comment1:
+#         comment += (' // '+comment1)
+#
+#     outFile.write('\n'+image+'\t'+filtername+'\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t'
+#                     %(mjd,calMagsDao,errMagDao,calMagsAp,errMagAp))
+#     outFile.write(comment)
+#
+#
+# outFile.close()
+#
+# ZPfile.close()
+#
+#
 os.remove('phot_out.txt')
 
-
-for i in glob.glob('*.mag.*'):
-    shutil.copy(i,outdir)
-
-for i in glob.glob('*.psf.*'):
-    shutil.copy(i,outdir)
+#
+# for i in glob.glob('*.mag.*'):
+#     shutil.copy(i,outdir)
+#
+# for i in glob.glob('*.psf.*'):
+#     shutil.copy(i,outdir)
 
 for i in glob.glob('*.mag.*'):
     os.remove(i)
@@ -1109,4 +1111,4 @@ for i in glob.glob('coords'):
     os.remove(i)
 
 
-print '\n##########################################\nFinished!\nCalibrated PSF phot saved to ./PSF_phot.txt\nAperture photometry saved to ./ap_phot.txt\nCheck PSF_output/ for additional info\n##########################################'
+print '\n##########################################\nFinished!\n##########################################'

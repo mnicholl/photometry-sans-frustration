@@ -160,7 +160,6 @@ args = parser.parse_args()
 
 aprad = args.aprad
 skyrad = args.skyrad
-nPSF = args.nPSF
 recen_rad_sn = args.recen_rad_sn
 z1 = args.z1
 z2 = args.z2

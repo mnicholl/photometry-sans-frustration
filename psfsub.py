@@ -247,7 +247,7 @@ outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tcomments')
 
 
 
-fig1 = plt.figure(1,(14,7))
+fig1 = plt.figure(1,(10,6))
 
 plt.clf()
 
@@ -371,7 +371,7 @@ if not template:
     if len(suggTemp)>0:
         template = suggTemp[0]
     else:
-        print 'No template found locally...'
+        sys.exit('No template found locally...')
 
     print '\n####################\n\nTemplate found: '+template
 
@@ -741,7 +741,7 @@ if filtername1 in seqMags:
 
 plt.draw()
 
-con = raw_input('\n> Enter to proceed to template...')
+# con = raw_input('\n> Enter to proceed to template...')
 
 # plt.close(fig1)
 
@@ -775,7 +775,7 @@ except:
     iraf.hedit(image=template,fields='PC002002',add='no',addonly='no',
                 delete='yes',verify='no',update='yes')
 
-fig2 = plt.figure(2,(14,7))
+# fig2 = plt.figure(2,(10,6))
 
 plt.clf()
 
@@ -998,7 +998,7 @@ tmplmask = np.array(tmplIm1[:,0],dtype=int)[~np.isnan(tmplIm1[:,3])]-1
 
 plt.draw()
 
-con = raw_input('\n> Enter to align images...')
+# con = raw_input('\n> Enter to align images...')
 
 ################################
 # Part three: Geomap and geotran
@@ -1076,7 +1076,8 @@ iraf.imreplace(image=image.split('.fits')[0]+'_ped.fits',
                 value=np.median(imdata)+0.001, upper=0.1)
 
 
-fig3 = plt.figure(3,(14,7))
+# fig3 = plt.figure(3,(10,6))
+plt.clf()
 
 # NEED TO MEASURE PSF ON TRANSFORMED IMAGE!
 
@@ -1203,7 +1204,7 @@ ax3.set_axis_off()
 
 plt.draw()
 
-con = raw_input('\n> Enter to subtract images...')
+# con = raw_input('\n> Enter to subtract images...')
 
 ################################
 # Part four: Run HOTPANTS
@@ -1338,7 +1339,8 @@ else:
     psfModel = image+'.psf.'+str(j)+'.fits'
 
 
-fig4 = plt.figure(4,(14,7))
+# fig4 = plt.figure(4,(10,6))
+plt.clf()
 
 ax1 = plt.subplot(121)
 
@@ -1571,12 +1573,12 @@ outFile.write('\n'+image+'\t'+filtername1+'\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t'
 outFile.write(comment)
 
 
-con = raw_input('\n> Finished... ')
+# con = raw_input('\n> Finished... ')
 
-plt.close(fig1)
-plt.close(fig2)
-plt.close(fig3)
-plt.close(fig4)
+# plt.close(fig1)
+# plt.close(fig2)
+# plt.close(fig3)
+# plt.close(fig4)
 
 outFile.close()
 
