@@ -51,6 +51,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import argparse
 from matplotlib.patches import Circle
 import requests
+import time
 try:
     from queryPS1 import PS1catalog
 except:
@@ -236,21 +237,6 @@ filtSyn = {'u':['u','SDSS-U','up','up1','U640','F336W','Sloan_u','u_Sloan'],
 
 filtAll = 'ugrizUBVRIJHK'
 
-
-
-#
-# outdir = 'PSF_output_'+str(len(glob.glob('PSF_phot_*')))
-#
-# if not os.path.exists(outdir): os.makedirs(outdir)
-#
-#
-# outFile = open('PSF_phot_'+str(len(glob.glob('PSF_phot_*')))+'.txt','w')
-#
-# ZPfile = open(os.path.join(outdir,'zeropoints.txt'),'w')
-#
-#
-# outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tcomments')
-#
 
 
 plt.figure(1,(14,7))

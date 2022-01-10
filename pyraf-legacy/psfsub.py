@@ -17,6 +17,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import argparse
 from matplotlib.patches import Circle
 import requests
+import time
 try:
     from queryPS1 import PS1catalog
 except:
@@ -232,12 +233,12 @@ filtAll = 'ugrizUBVRIJHK'
 
 
 
-outdir = 'PSF_sub_output_'+str(len(glob.glob('PSF_sub_phot_*')))
+outdir = 'PSF_sub_output_'+str(int(time.time()))
 
 if not os.path.exists(outdir): os.makedirs(outdir)
 
 
-outFile = open('PSF_sub_phot_'+str(len(glob.glob('PSF_sub_phot_*')))+'.txt','w')
+outFile = open('PSF_sub_phot_'+str(int(time.time()))+'.txt','w')
 
 ZPfile = open(os.path.join(outdir,'zeropoints.txt'),'w')
 
@@ -1625,9 +1626,6 @@ for i in glob.glob('*_psf_stars.txt'):
 for i in glob.glob('coords'):
     os.remove(i)
 
-for i in glob.glob('geomap*.txt'):
-    os.remove(i)
-
 for i in glob.glob('template0.fits'):
     os.remove(i)
 
@@ -1637,4 +1635,6 @@ if not keep:
     for i in glob.glob('*_aligned_tmpl.fits'):
         os.remove(i)
     for i in glob.glob('*_ped_conv.fits'):
+        os.remove(i)
+    for i in glob.glob('geomap*.txt'):
         os.remove(i)
