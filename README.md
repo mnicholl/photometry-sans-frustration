@@ -1,6 +1,6 @@
 # photometry-sans-frustration (psf)
 
-Interactive python wrapper for point-spread fitting (PSF) photometry using IRAF/DAOphot (dev version uses Astropy/photutils)
+Interactive python wrapper for point-spread fitting (PSF) photometry using Astropy/photutils (legacy version uses Pyraf/DAOphot)
 
 Requires two text files: one with transient coordinates and one with reference stars (see examples). If no reference star file is provided, code will attempt to create one by querying the PanSTARRS catalog.
 
