@@ -10,7 +10,9 @@ measure transient photometry on image. Can specify multiple images with list or 
     psf.py
     psf.py -i image.fits [--options]
 
-The other scripts below need to be re-written in Python 3 as some dependencies are no longer maintained. Use them at your own risk!
+Now includes automated stacking and template subtraction.
+
+Legacy scripts below require IRAF/PyRAF. Use them at your own risk!
 
 psfcom:
 stack multiple images and then do photometry (NOTE: can now be done in python 3 version using psf.py --stack)
@@ -18,7 +20,7 @@ stack multiple images and then do photometry (NOTE: can now be done in python 3 
     psfcom.py --i images [--options]
 
 psfsub:
-spatially match, convolve and subtract template image, then do photometry. Wrapper for hotpants (A. Becker)
+spatially match, convolve and subtract template image, then do photometry. Wrapper for hotpants (A. Becker).  (NOTE: can now be done in python 3 version using psf.py --stack. Uses PyZOGY (Zackay, Ofek and Gal-Yam))
 
     psfsub.py -i image.fits -t template.fits [--options]
 

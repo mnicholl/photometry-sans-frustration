@@ -1,15 +1,16 @@
 #!/usr/bin/env python
 
-version = '0.3'
+version = '1.0'
 
 '''
     PSF: PHOTOMETRY SANS FRUSTRATION
 
-    Written by Matt Nicholl, 2015-2021
+    Written by Matt Nicholl, 2015-2022
 
     Requirements:
 
-    Needs astropy, numpy, and matplotlib. Also requests if querying PanSTARRS.
+    Needs photutils, astropy, numpy, matplotlib, skimage, requests, astroquery, astroalign.
+    Also pyzogy if running with template subtraction.
 
     Previously in IRAF, completely re-written for Python 3 using photutils
 
@@ -29,8 +30,8 @@ version = '0.3'
     Format:
     RA_value DEC_value  MAGBAND1_value    MAGBAND2_value    ...
 
-    If sequence star file does not exist, code will create one from PS1 archive.
-    But note that PS1 only contains grizy magnitudes!
+    If sequence star file does not exist, code will create one from PS1 or SDSS archive.
+    But note that PS1/SDSS only contain ugrizy magnitudes!
 
     Given this list of field star magnitudes and coordinates, psf.py will
     compute the zeropoint of the image, construct a point spread function
@@ -47,7 +48,11 @@ version = '0.3'
         - PSFmag is from PSF fitting, APmag is from simple aperture photometry
         using aperture size specified with --ap (default 10 pixel radius)
         - ZP is measured from sequence stars
+        - Any template subtracted
         - comment allows user to specify if e.g. PSF fit looked unreliable
+        
+        
+    For image subtraction, template name must be template_<standard filter name>.fits !!!
 
     NEED TO FULLY DOCUMENT...
 
@@ -70,6 +75,21 @@ from astropy import visualization
 from skimage.registration import phase_cross_correlation
 from scipy.ndimage import interpolation as interp
 import time
+from astroquery.sdss import SDSS
+from astropy import coordinates as coords
+import astropy.units as u
+from astropy.io import fits
+from astropy.nddata import Cutout2D
+import astroalign as aa
+#from reproject import reproject_interp
+from PyZOGY.subtract import run_subtraction
+from photutils.utils import calc_total_error
+import warnings
+
+
+warnings.filterwarnings("ignore")
+
+
 
 # Optional flags:
 
@@ -79,11 +99,11 @@ parser.add_argument('--ims','-i', dest='file_to_reduce', default='', nargs='+',
                     help='List of files to reduce. Accepts wildcards or '
                     'space-delimited list.')
 
-parser.add_argument('--magmin', dest='magmin', default=21.5, type=float,
-                    help='Faintest sequence stars to return from PS1 query ')
+parser.add_argument('--magmin', dest='magmin', default=20.5, type=float,
+                    help='Faintest sequence stars to use ')
 
 parser.add_argument('--magmax', dest='magmax', default=16.5, type=float,
-                    help='Brightest sequence stars to return from PS1 query ')
+                    help='Brightest sequence stars to use ')
 
 parser.add_argument('--shifts', dest='shifts', default=False, action='store_true',
                     help='Apply manual shifts if WCS is a bit off ')
@@ -97,17 +117,27 @@ parser.add_argument('--sky', dest='skyrad', default=5, type=int,
 parser.add_argument('--box', dest='bkgbox', default=500, type=int,
                     help='Size of stamps for background fit.')
 
-parser.add_argument('--psfthresh', dest='psfthresh', default=25., type=float,
+parser.add_argument('--psfthresh', dest='psfthresh', default=20., type=float,
                     help='SNR threshold for inclusion in PSF model.')
 
 parser.add_argument('--zpsig', dest='sigClip', default=1, type=int,
                     help='Sigma clipping for rejecting sequence stars.')
+
+parser.add_argument('--samp', dest='samp', default=1, type=int,
+                    help='Oversampling factor for PSF build.')
 
 parser.add_argument('--quiet', dest='quiet', default=False, action='store_true',
                     help='Run with no user prompts')
 
 parser.add_argument('--stack', dest='stack', default=False, action='store_true',
                     help='Stack images that are in the same filter')
+
+parser.add_argument('--sub', dest='sub', default=False, action='store_true',
+                    help='Subtract template images')
+
+parser.add_argument('--keep', dest='keep', default=False, action='store_true',
+                    help='Keep intermediate products')
+
 
 
 
@@ -121,8 +151,11 @@ skyrad = args.skyrad
 bkgbox = args.bkgbox
 psfthresh = args.psfthresh
 sigClip = args.sigClip
+samp = args.samp
 quiet = args.quiet
 stack = args.stack
+sub = args.sub
+keep = args.keep
 
 ims = [i for i in args.file_to_reduce]
 
@@ -137,7 +170,7 @@ if len(ims) == 0:
 
 ##### FUNCTIONS TO QUERY PANSTARRS #######
 
-def PS1catalog(ra,dec,magmin,magmax):
+def PS1catalog(ra,dec,magmin=25,magmax=8):
 
     queryurl = 'https://archive.stsci.edu/panstarrs/search.php?'
     queryurl += 'RA='+str(ra)
@@ -166,32 +199,32 @@ def PS1catalog(ra,dec,magmin,magmax):
         # Get rid of n_det column
         data = data[:,1:][data[:,0]>3]
 
-        # Get rid of non-detections:
-        data = data[data[:,2]>-999]
-        data = data[data[:,3]>-999]
-        data = data[data[:,4]>-999]
-        data = data[data[:,5]>-999]
-        data = data[data[:,6]>-999]
-
-        # Get rid of very faint stars
-        data = data[data[:,2]<magmin]
-        data = data[data[:,3]<magmin]
-        data = data[data[:,4]<magmin]
-        data = data[data[:,5]<magmin]
-        data = data[data[:,6]<magmin]
-
-        # Get rid of stars likely to saturate
-        data = data[data[:,2]>magmax]
-        data = data[data[:,3]>magmax]
-        data = data[data[:,4]>magmax]
-        data = data[data[:,5]>magmax]
-        data = data[data[:,6]>magmax]
+#        # Get rid of non-detections:
+#        data = data[data[:,2]>-999]
+#        data = data[data[:,3]>-999]
+#        data = data[data[:,4]>-999]
+#        data = data[data[:,5]>-999]
+#        data = data[data[:,6]>-999]
+#
+#        # Get rid of very faint stars
+#        data = data[data[:,2]<magmin]
+#        data = data[data[:,3]<magmin]
+#        data = data[data[:,4]<magmin]
+#        data = data[data[:,5]<magmin]
+#        data = data[data[:,6]<magmin]
+#
+#        # Get rid of stars likely to saturate
+#        data = data[data[:,2]>magmax]
+#        data = data[data[:,3]>magmax]
+#        data = data[data[:,4]>magmax]
+#        data = data[data[:,5]>magmax]
+#        data = data[data[:,6]>magmax]
 
 
         # Star-galaxy separation
         data = data[:,:-1][data[:,4]-data[:,-1]<0.05]
 
-        np.savetxt('PS1_seq.txt',data,fmt='%.8f\t%.8f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f',header='Ra\tDec\tg\tr\ti\tz\ty\n',comments='')
+        np.savetxt('PS1_seq.txt',data,fmt='%.8f\t%.8f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f', header='ra\tdec\tg\tr\ti\tz\ty',comments='')
 
         print('Success! Sequence star file created: PS1_seq.txt')
 
@@ -225,7 +258,7 @@ def PS1cutouts(ra,dec,filt):
         cutout_url += '&format=fits'
         cutout_url += '&red='+image_name
 
-        dest_file = filt + '_template.fits'
+        dest_file = 'template_'+filt+'.fits'
 
         cmd = 'wget -O %s "%s"' % (dest_file, cutout_url)
 
@@ -240,6 +273,86 @@ def PS1cutouts(ra,dec,filt):
 ##################################
 
 
+# QUERY SDSS
+
+def SDSScutouts(ra,dec,filt):
+
+    print('\nSearching for SDSS images of field...\n')
+
+    pos = coords.SkyCoord(str(ra)+' '+str(dec), unit='deg', frame='icrs')
+    
+    try:
+        xid = SDSS.query_region(pos)
+        if len(xid)>1:
+            xid.remove_rows(slice(1,len(xid)))
+            
+        im = SDSS.get_images(matches=xid, band=filt)
+        
+        dest_file = 'template_'+filt+'.fits'
+        
+        im[0].writeto(dest_file)
+        
+        print('Template downloaded as ' + dest_file + '\n')
+
+    except:
+        print('\SDSS template search failed!\n')
+        
+        
+def SDSScatalog(ra,dec,magmin=25,magmax=8):
+ 
+    print('\nQuerying SDSS for reference stars via Astroquery...\n')
+
+    pos = coords.SkyCoord(str(ra)+' '+str(dec), unit='deg', frame='icrs')
+    
+    data = SDSS.query_region(pos,radius='0.1d',fields=('ra','dec','u','g','r','i','z','type'))
+    
+    data = data[data['type'] == 6]
+
+#    # Get rid of non-detections:
+#    data = data[data['u']>-9999]
+#    data = data[data['g']>-9999]
+#    data = data[data['r']>-9999]
+#    data = data[data['i']>-9999]
+#    data = data[data['z']>-9999]
+#
+#    # Get rid of very faint stars
+#    data = data[data['u']<magmin]
+#    data = data[data['g']<magmin]
+#    data = data[data['r']<magmin]
+#    data = data[data['i']<magmin]
+#    data = data[data['z']<magmin]
+#
+#    # Get rid of stars likely to saturate
+#    data = data[data['u']>magmax]
+#    data = data[data['g']>magmax]
+#    data = data[data['r']>magmax]
+#    data = data[data['i']>magmax]
+#    data = data[data['z']>magmax]
+    
+    # NEED TO REMOVE DUPLICATES
+
+    catalog = coords.SkyCoord(ra=data['ra']*u.degree, dec=data['dec']*u.degree)
+    
+    data2 = data[:0].copy()
+    
+    indices = np.arange(len(data))
+    
+    used = []
+    
+    for i in data:
+        source = coords.SkyCoord(ra=i['ra']*u.degree, dec=i['dec']*u.deg)
+        d2d = source.separation(catalog)
+        catalogmsk = d2d < 2.5*u.arcsec
+        indexmatch = indices[catalogmsk]
+        for j in indexmatch:
+            if j not in used:
+                data2.add_row(data[j])
+                for k in indexmatch:
+                    used.append(k)
+
+    data2.write('SDSS_seq.txt',format='ascii',overwrite=True, exclude_names=['type'],delimiter='\t')
+    
+    print('Success! Sequence star file created: SDSS_seq.txt')
 
 
 # Try to match header keyword to a known filter automatically:
@@ -274,7 +387,7 @@ if not os.path.exists(outdir): os.makedirs(outdir)
 
 # A file to write final magnitudes
 outFile = open(os.path.join(outdir,'PSF_phot_'+str(len(glob.glob(os.path.join(outdir,'PSF_phot_*'))))+'.txt'),'w')
-outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tZP\terr\tcomments')
+outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tZP\terr\ttemplate\tcomments')
 
 
 
@@ -287,7 +400,7 @@ plt.show()
 
 
 ################################
-# Part one: get sequence stars
+# Part one: get coordinates
 ################################
 
 # Search for SN coordinates file (1 line: RA Dec) in this directory and parents
@@ -309,32 +422,6 @@ print('\n####################\n\nSN coordinates found: '+snFile)
 RAdec = np.genfromtxt(snFile)
 
 
-# Search for sequence star file (RA, dec, mags)
-
-suggSeq = glob.glob('*seq.txt')
-if len(suggSeq)==0:
-    suggSeq = glob.glob('../*seq.txt')
-if len(suggSeq)==0:
-    suggSeq = glob.glob('../../*seq.txt')
-if len(suggSeq)>0:
-    seqFile = suggSeq[0]
-else:
-    print('No sequence star data found locally...')
-    try:
-        PS1catalog(RAdec[0],RAdec[1],magmin,magmax)
-        seqFile = 'PS1_seq.txt'
-    except:
-        sys.exit('Error: no local sequence star file and PS1 query failed')
-
-print('\n####################\n\nSequence star magnitudes found: '+seqFile)
-
-
-seqDat = np.genfromtxt(seqFile,skip_header=1)
-seqHead = np.genfromtxt(seqFile,skip_footer=len(seqDat),dtype=str)
-
-seqMags = {}
-for i in range(len(seqHead)-2):
-    seqMags[seqHead[i+2]] = seqDat[:,i+2]
 
 
 #### BEGIN LOOP OVER IMAGES ####
@@ -353,20 +440,22 @@ filtertab = []
 
 for image in ims:
 
+    if not os.path.exists(image):
+        continue
 
     print('\nFile: ' + image)
     try:
-        filtername = astropy.io.fits.getval(image,'FILTER')
+        filtername = fits.getval(image,'FILTER')
     except:
         try:
-            filtername = astropy.io.fits.getval(image,'FILTER1')
+            filtername = fits.getval(image,'FILTER1')
             if filtername == ('air' or 'none' or 'clear'):
-                filtername = astropy.io.fits.getval(image,'FILTER2')
+                filtername = fits.getval(image,'FILTER2')
             if filtername == ('air' or 'none' or 'clear'):
-                filtername = astropy.io.fits.getval(image,'FILTER3')
+                filtername = fits.getval(image,'FILTER3')
         except:
             try:
-                filtername = astropy.io.fits.getval(image,'NCFLTNM2')
+                filtername = fits.getval(image,'NCFLTNM2')
             except:
                 filtername = 'none'
     print('Filter found in header: ' + filtername)
@@ -382,21 +471,45 @@ for image in ims:
         filtername = input('Please enter filter ('+filtAll+') ')
 
     try:
-        mjd = astropy.io.fits.getval(image,'MJD')
+        mjd = fits.getval(image,'MJD')
     except:
         try:
-            mjd = astropy.io.fits.getval(image,'MJD-OBS')
+            mjd = fits.getval(image,'MJD-OBS')
         except:
             try:
-                jd = astropy.io.fits.getval(image,'JD')
+                jd = fits.getval(image,'JD')
                 mjd = jd - 2400000
             except:
                 mjd = 99999
 
         mjd = float(mjd)
 
+    template = ''
 
-    filtertab.append([image, filtername, mjd])
+    if sub==True:
+        if os.path.exists('template_'+filtername+'.fits'):
+            template = 'template_'+filtername+'.fits'
+        elif os.path.exists('../template_'+filtername+'.fits'):
+            template = '../template_'+filtername+'.fits'
+        elif os.path.exists('../../template_'+filtername+'.fits'):
+            template = '../../template_'+filtername+'.fits'
+        else:
+            print('No template found locally...')
+            if filtername in ('g','r','i','z'):
+                try:
+                    PS1cutouts(RAdec[0],RAdec[1],filtername)
+                    template = 'template_'+filtername+'.fits'
+                except:
+                    print('Error: could not match template from PS1')
+            elif filtername == 'u':
+                try:
+                    SDSScutouts(RAdec[0],RAdec[1],filtername)
+                    template = 'template_'+filtername+'.fits'
+                except:
+                    print('Error: could not match template from SDSS')
+
+
+    filtertab.append([image, filtername, mjd, template])
 
     if not filtername in usedfilters:
         usedfilters.append(filtername)
@@ -414,41 +527,142 @@ for f in usedfilters:
     print('\n\n#########\n'+f+'-band\n#########')
 
     ims1 = filtertab[:,0][filtertab[:,1]==f]
+    
+    templates1 = filtertab[:,-1][filtertab[:,1]==f]
+        
+    if sub==True:
+        if len(np.unique(templates1)) > 1:
+            print('Warning: different templates for same filter!')
+            print('Using '+templates1[0])
+        
+        template = templates1[0]
+
+    ######## Search for sequence star file (RA, dec, mags)
+
+    # Check folder/parent for sequence stars
+    suggSeq = glob.glob('*seq.txt')
+    if len(suggSeq)==0:
+        suggSeq = glob.glob('../*seq.txt')
+    if len(suggSeq)==0:
+        suggSeq = glob.glob('../../*seq.txt')
+        
+    # Note PS1 sequence to avoid always downloading
+    if 'PS1_seq.txt' in suggSeq:
+        hasPS1 = True
+    else:
+        hasPS1 = False
+
+    # If more than one sequence star file, check which has the required filter
+    if len(suggSeq)>0:
+        n = 0
+        for i in range(len(suggSeq)):
+            seqDat = np.genfromtxt(suggSeq[i-n])
+            seqHead = np.genfromtxt(suggSeq[i-n],skip_footer=len(seqDat)-1,dtype=str)
+            if f not in seqHead:
+                suggSeq.pop(i-n)
+                n += 1
+                
+    # if PS1 has required filter, give it priority
+    if 'PS1_seq.txt' in suggSeq:
+        seqFile = 'PS1_seq.txt'
+    elif len(suggSeq)>0:
+        seqFile = suggSeq[0]
+
+    # if no sequence stars, download from PS1...
+    if len(suggSeq)==0:
+        if hasPS1 == True:
+            print('Could not find sequence stars in this filter, but have PS1 for coordinates')
+        else:
+            print('No sequence star data found locally...')
+            try:
+                PS1catalog(RAdec[0],RAdec[1])
+                seqFile = 'PS1_seq.txt'
+                print('Found PS1 stars')
+                trySDSS = False
+            except:
+                print('PS1 query failed')
+                trySDSS = True
+        # if not in PS1 or filter is u-band, query also SDSS
+        if f == 'u' or trySDSS == True:
+            try:
+                SDSScatalog(RAdec[0],RAdec[1])
+                seqFile = 'SDSS_seq.txt'
+                print('Found SDSS stars')
+            except:
+                print('SDSS query failed')
+
+
+    print('\n####################\n\nSequence star magnitudes: '+seqFile)
+
+
+    seqDat = np.genfromtxt(seqFile)
+    seqHead = np.genfromtxt(seqFile,skip_footer=len(seqDat)-1,dtype=str)
+
+    seqMags = {}
+    for i in range(len(seqHead)-2):
+        seqMags[seqHead[i+2]] = seqDat[:,i+2]
+
+
+
 
     zero_shift_image = ''
+    
+    dostack = 'n'
 
-    if len(ims1) > 1 and stack==True:
+    if stack==True:
+        dostack = 'y'
+        if len(ims1) < 2:
+            print('\nOnly 1 image in filter, skipping stacking!')
+            dostack = 'n'
+        else:
+            if os.path.exists('stack_'+f+'.fits'):
+                if not quiet:
+                    dostack = input('\nStack already found in filter, overwrite? [n]')
+                    if not dostack: dostack = 'n'
+                else:
+                    dostack = 'n'
+                ims1 = ['stack_'+f+'.fits']
+                
+    if dostack in ('y','yes'):
         print('\nAligning and stacking images...')
+        
         mjdstack = np.mean(filtertab[:,2][filtertab[:,1]==f].astype(float))
 
         zero_shift_image = ims1[0]
-
+        
         imshifts = {} # dictionary to hold the x and y shift pairs for each image
         for im1 in ims1:
-            ## register_translation is a function that calculates shifts by comparing 2-D arrays
+            ## phase_cross_correlation is a function that calculates shifts by comparing 2-D arrays
             imshift, imshifterr, diffphase = phase_cross_correlation(
-                astropy.io.fits.getdata(zero_shift_image),
-                astropy.io.fits.getdata(im1))
+                fits.getdata(zero_shift_image),
+                fits.getdata(im1))
             imshifts[im1] = imshift
 
         ## new dictionary for shifted image data:
         shifted_data = {}
         for im1 in imshifts:
             shifted_data[im1] = interp.shift(
-                astropy.io.fits.getdata(im1),
+                fits.getdata(im1),
                 imshifts[im1])
             shifted_data[im1][shifted_data[im1] == 0] = 'nan'
 
         shifted_data_cube = np.stack([shifted_data[im1] for im1 in ims1])
         stacked_data = np.nanmedian(shifted_data_cube, axis=0)
+        
+        stackheader = fits.getheader(zero_shift_image)
+        
+        stackheader['MJD'] = mjdstack
+        stackheader['MJD-OBS'] = mjdstack
 
-        astropy.io.fits.writeto(os.path.join(outdir,'stack_'+f+'.fits'),
-                stacked_data,header=astropy.io.fits.getheader(zero_shift_image),
+        fits.writeto('stack_'+f+'.fits',
+                stacked_data,header=stackheader,
                 overwrite=True)
 
         print('Done')
 
-        ims2 = ['aligned_stacked_data']
+        ### NEED TO MAKE COMPATIBLE WITH NAMES OF IMAGE IN SUBTRACTION PART
+
+        ims2 = ['stack_'+f+'.fits']
     else:
         ims2 = ims1.copy()
 
@@ -459,36 +673,48 @@ for f in usedfilters:
 
         print('\n> Image: '+image)
 
-        mjd = str(mjdstack) if stack else filtertab[:,2][filtertab[:,0]==image][0]
+        if image == 'stack_'+f+'.fits':
+            mjd = fits.getval(filename='stack_'+f+'.fits',keyword='MJD')
+        else:
+            mjd = filtertab[:,2][filtertab[:,0]==image][0]
 
         comment1 = ''
 
-        if image == 'aligned_stacked_data':
-            data = stacked_data
-            header = astropy.io.fits.getheader(zero_shift_image)
-        else:
-            im = astropy.io.fits.open(image)
 
-            try:
-                im[0].verify('fix')
+### NEED TO MAKE COMPATIBLE WITH NAMES OF IMAGE IN SUBTRACTION PART
 
-                data = im[0].data
-                header = im[0].header
-                checkdat = len(data)
+        im = fits.open(image)
 
-            except:
-                im[1].verify('fix')
+        try:
+            im[0].verify('fix')
 
-                data = im[1].data
-                header = im[1].header
+            data = im[0].data
+            header = im[0].header
+            checkdat = len(data)
+
+        except:
+            im[1].verify('fix')
+
+            data = im[1].data
+            header = im[1].header
+            
+        try:
+            gain = header['GAIN']
+        except:
+            gain = 1.0
 
 
         # Set up sequence stars, initial steps
+        
+        mag_range = (seqMags[f]>magmax)&(seqMags[f]<magmin)
+        
         co = astropy.wcs.WCS(header=header).all_world2pix(seqDat[:,0],seqDat[:,1],1)
         co = np.array(list(zip(co[0],co[1])))
+        
+        co = co[mag_range]
 
-        # Remove any stars falling outside the image
-        inframe = (co[:,0]>0)&(co[:,0]<len(data[0])-1)&(co[:,1]>0)&(co[:,1]<len(data)-1)
+        # Remove any stars falling outside the image or too close to edge
+        inframe = (co[:,0]>2*aprad)&(co[:,0]<len(data[0])-2*aprad)&(co[:,1]>2*aprad)&(co[:,1]<len(data)-2*aprad)
         co = co[inframe]
 
         # Find and remove bad pixels and sequence stars: nans, regions of zero etc.
@@ -514,8 +740,12 @@ for f in usedfilters:
         print('\nSubtracting background...')
 
         bkg = photutils.background.Background2D(data,box_size=bkgbox)
+        
+        bkg_error = bkg.background_rms
 
         data = data.astype(float) - bkg.background
+        
+        err_array = calc_total_error(data, bkg_error, gain)
         
         axBKG = plt.subplot2grid((2,5),(0,2))
         
@@ -608,28 +838,7 @@ for f in usedfilters:
 
         photaps = photutils.CircularAperture(co, r=aprad)
 
-        photTab = photutils.aperture_photometry(data, photaps)
-
-        # Get median sky in annulus for each star
-
-        skyaps = photutils.CircularAnnulus(co, r_in=aprad, r_out=aprad+skyrad)
-
-        skyTab = photutils.aperture_photometry(data, skyaps)
-
-        skymasks = skyaps.to_mask(method='center')
-
-        bkg_local = []
-        for i in range(len(skymasks)):
-            try:
-                skydata = skymasks[i].multiply(data)
-                skydata_1d = skydata[skymasks[i].data > 0]
-                meansky, mediansky, sigsky = astropy.stats.sigma_clipped_stats(skydata_1d)
-                bkg_local.append(mediansky)
-            except:
-                bkg_local.append(skyTab['aperture_sum'][i]/skyaps.area)
-        bkg_local = np.array(bkg_local)
-        photTab['local_sky'] = bkg_local
-        photTab['aper_sum_sub'] = photTab['aperture_sum'] - bkg_local * photaps.area
+        photTab = photutils.aperture_photometry(data, photaps, error=err_array)
 
         print('Done')
 
@@ -645,17 +854,43 @@ for f in usedfilters:
 
         # Create model from sequence stars
         happy = 'n'
-        while happy!='y':
+        while happy not in ('y','yes'):
 
             # extract stars from image
-            psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aper_sum_sub']>psfthresh*np.sqrt(photTab['aper_sum_sub']+bkg.background_median*photaps.area)], size=2*aprad)
+            psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*aprad+5)
+            while(len(psfstars))<3:
+                print('Warning: too few PSF stars with threshold '+str(psfthresh)+' sigma, trying lower sigma)')
+                psfthresh -= 1
+                psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*aprad+5)
 
-            plt.errorbar(psfstars.center_flat[:,0],psfstars.center_flat[:,1],fmt='*',mfc='none',
-            markeredgecolor='lime',markeredgewidth=2,
-            markersize=20,label='Used in PSF fit')
+            ax1.clear()
+            
+            ax1.imshow(data, origin='lower',cmap='gray',
+                        vmin=visualization.ZScaleInterval().get_limits(data)[0],
+                        vmax=visualization.ZScaleInterval().get_limits(data)[1])
+
+            ax1.set_title(image+' ('+f+')')
+
+            ax1.set_xlim(0,len(data))
+            ax1.set_ylim(0,len(data))
+
+            ax1.get_yaxis().set_visible(False)
+            ax1.get_xaxis().set_visible(False)
+            
+            ax1.errorbar(SNco[0],SNco[1],fmt='o',markeredgecolor='r',mfc='none',
+                            markeredgewidth=3,markersize=20)
+
+            ax1.errorbar(co[:,0],co[:,1],fmt='s',mfc='none',markeredgecolor='C0',
+                                            markersize=8,markeredgewidth=1.5)
+
+            ax1.errorbar(psfstars.center_flat[:,0],psfstars.center_flat[:,1],fmt='*',mfc='none', markeredgecolor='lime',markeredgewidth=2, markersize=20,label='Used in PSF fit')
+
+            ax1.legend(frameon=True,fontsize=16)
+
 
             # build PSF
-            epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,oversampling=3)
+            epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
+                            oversampling=samp,smoothing_kernel='quadratic',shape=2*aprad-1)
             epsf, fitted_stars = epsf_builder(psfstars)
 
             psf = epsf.data
@@ -694,10 +929,24 @@ for f in usedfilters:
             if not quiet:
                 happy = input('\nProceed with this PSF? [y] ')
                 if not happy: happy = 'y'
-                if happy != 'y':
-                    aprad = int(input('Try new aperture radius: [' +str(aprad)+']'))
+                if happy not in ('y','yes'):
+                    aprad1 = input('Try new aperture radius: [' +str(aprad)+']')
+                    if not aprad1: aprad1 = aprad
+                    aprad = int(aprad1)
+                    
+                    psfthresh1 = input('Try new inclusion threshold: [' +str(psfthresh)+' sigma]')
+                    if not psfthresh1: psfthresh1 = psfthresh
+                    psfthresh = int(psfthresh1)
+                    
+                    samp1 = input('Try new PSF oversampling: [' +str(samp)+']')
+                    if not samp1: samp1 = samp
+                    samp = int(samp1)
             else:
                 happy = 'y'
+                
+                
+        scipsf = fits.PrimaryHDU(psf)
+        scipsf.writeto('sci_psf.fits',overwrite=True)
 
         print('\nStarting PSF photometry...')
 
@@ -705,12 +954,12 @@ for f in usedfilters:
 
         psfcoordTable['x_0'] = co[:,0]
         psfcoordTable['y_0'] = co[:,1]
-        psfcoordTable['flux_0'] = photTab['aper_sum_sub']
+        psfcoordTable['flux_0'] = photTab['aperture_sum']
 
         grouper = photutils.psf.DAOGroup(crit_separation=aprad)
 
         # need an odd number of pixels to fit PSF
-        fitrad = 2*aprad - 1
+        fitrad = 2*aprad + 1
 
         psfphot = photutils.psf.BasicPSFPhotometry(group_maker=grouper,
                         bkg_estimator=photutils.background.MMMBackground(),
@@ -725,13 +974,13 @@ for f in usedfilters:
                     vmin=visualization.ZScaleInterval().get_limits(data)[0],
                     vmax=visualization.ZScaleInterval().get_limits(data)[1])
 
-        goodStars = (photTab['aper_sum_sub']>5*np.sqrt(photTab['aper_sum_sub']+bkg.background_median*photaps.area))&(psfphotTab['flux_fit']/psfphotTab['flux_0']>0.7)&(psfphotTab['flux_fit']/psfphotTab['flux_0']<1.3)
+        goodStars = (photTab['aperture_sum']>5*photTab['aperture_sum_err'])&(psfphotTab['flux_fit']/psfphotTab['flux_0']>0.5)&(psfphotTab['flux_fit']/psfphotTab['flux_0']<1.5)
 
-#        ax1.errorbar(co[:,0][~goodStars],co[:,1][~goodStars],fmt='x',mfc='none',
-#                    markeredgewidth=2, color='C1',
-#                    markersize=8,label='PSF/ap differ by >30%')
+        ax1.errorbar(co[:,0][~goodStars],co[:,1][~goodStars],fmt='x',mfc='none',
+                    markeredgewidth=2, color='C1',
+                    markersize=8,label='Too faint or PSF/ap differ')
                     
-        ax1.legend(frameon=True)
+        ax1.legend(frameon=True,fontsize=16)
 
 #        ax1.text(len(data[:,0])*0.8,len(data[:,1])*0.9,'Rejected',color='C1')
 
@@ -742,52 +991,81 @@ for f in usedfilters:
         print('\nComputing image zeropoint...')
 
         if f in seqMags:
-
-            flux = np.array(psfphotTab['flux_fit'])[goodStars]
-            seqIm = -2.5*np.log10(flux)
-
-            zpList1 = seqMags[f][inframe][goodpix][found][goodStars]-seqIm
-
-            axZP = plt.subplot2grid((2,5),(1,2))
-
-            axZP.scatter(seqMags[f][inframe][goodpix][found][goodStars],zpList1,color='r')
-
-            zp1 = np.mean(zpList1)
-            errzp1 = np.std(zpList1)
-
-            print('\nInitial zeropoint =  %.2f +/- %.2f\n' %(zp1,errzp1))
-            print('Checking for bad stars...')
-
-            checkMags = np.abs(seqIm+zp1-seqMags[f][inframe][goodpix][found][goodStars])<errzp1*sigClip
-
-            if False in checkMags:
-                print('Rejecting stars from ZP: ')
-                print(psfphotTab['id'][goodStars][~checkMags])
-                print('Bad ZPs:')
-                print(seqMags[f][inframe][goodpix][found][goodStars][~checkMags]-seqIm[~checkMags])
-
-            ax1.errorbar(co[:,0][goodStars][~checkMags],
-                        co[:,1][goodStars][~checkMags],fmt='x',mfc='none',
-                        markeredgewidth=2, color='C3',
-                        markersize=8,label='Sigma clipped from ZP')
-
-            ax1.legend(frameon=True)
-
-            zpList = seqMags[f][inframe][goodpix][found][goodStars][checkMags]-seqIm[checkMags]
-
-            ZP = np.mean(zpList)
-            errZP = np.std(zpList)/np.sqrt(len(zpList))
+        
+            magmax2 = magmax
+            magmin2 = magmin
             
-            axZP.scatter(seqMags[f][inframe][goodpix][found][goodStars][checkMags],zpList,color='k')
+            happy = 'n'
+            while happy not in ('y','yes'):
+            
+                mag_range_2 = (seqMags[f][mag_range][inframe][goodpix][found][goodStars]>magmax2) & (seqMags[f][mag_range][inframe][goodpix][found][goodStars]<magmin2)
+            
+                flux = np.array(psfphotTab['flux_fit'])[goodStars]
+                seqIm = -2.5*np.log10(flux)
 
-            axZP.axhline(ZP,linestyle='-',color='C0')
-            axZP.axhline(ZP-errZP,linestyle='--',color='C0')
-            axZP.axhline(ZP+errZP,linestyle='--',color='C0')
+                zpList1 = seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2] - seqIm[mag_range_2]
 
-            axZP.set_xlabel('Magnitude')
-            axZP.set_title('Zero point')
+                axZP = plt.subplot2grid((2,5),(1,2))
 
-            print('\nFinal Zeropoint = %.2f +/- %.2f\n' %(ZP,errZP))
+                axZP.scatter(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2], zpList1,color='r')
+
+                zp1 = np.nanmean(zpList1)
+                errzp1 = np.nanstd(zpList1)
+
+                print('\nInitial zeropoint =  %.2f +/- %.2f\n' %(zp1,errzp1))
+                print('Checking for bad stars...')
+
+                checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < errzp1*sigClip
+
+#                if False in checkMags:
+#                    print('Rejecting stars from ZP: ')
+#                    print(psfphotTab['id'][goodStars][mag_range_2][~checkMags])
+#                    print('Bad ZPs:')
+#                    print( seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][~checkMags] - seqIm[mag_range_2][~checkMags])
+
+                ax1.errorbar(co[:,0][goodStars][mag_range_2][~checkMags],
+                            co[:,1][goodStars][mag_range_2][~checkMags],fmt='x',mfc='none',
+                            markeredgewidth=2, color='C3',
+                            markersize=8,label='Sigma clipped from ZP')
+
+                ax1.legend(frameon=True,fontsize=16)
+
+                zpList = seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags] - seqIm[mag_range_2][checkMags]
+
+                ZP = np.mean(zpList)
+                errZP = np.std(zpList)/np.sqrt(len(zpList))
+                
+                axZP.scatter(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags], zpList,color='k')
+
+                axZP.axhline(ZP,linestyle='-',color='C0')
+                axZP.axhline(ZP-errZP,linestyle='--',color='C0')
+                axZP.axhline(ZP+errZP,linestyle='--',color='C0')
+
+                axZP.set_xlabel('Magnitude')
+                axZP.set_title('Zero point')
+                
+                axZP.set_ylim(max(max(zpList1)+0.5,ZP+1),min(min(zpList1)-0.5,ZP-1))
+                axZP.set_xlim(magmax2,magmin2)
+                
+                plt.draw()
+
+                print('\nFinal Zeropoint = %.2f +/- %.2f' %(ZP,errZP))
+
+                
+                if not quiet:
+                    happy = input('\nProceed with this zeropoint? [y] ')
+                    if not happy: happy = 'y'
+                    if happy not in ('y','yes'):
+                        magmax1 = input('Use new maximum mag: [' +str(magmax2)+']')
+                        if not magmax1: magmax1 = magmax2
+                        magmax2 = float(magmax1)
+                                                
+                        magmin1 = input('Use new minimum mag: [' +str(magmin2)+']')
+                        if not magmin1: magmin1 = magmin2
+                        magmin2 = float(magmin1)
+                else:
+                    happy = 'y'
+
 
         else:
             ZP = np.nan
@@ -795,6 +1073,329 @@ for f in usedfilters:
 
             print('\nCould not determine ZP (no sequence star mags in filter?) : instrumental mag only!!!')
 
+        
+    ########### Template subtraction
+    
+        if sub == True:
+ 
+            if not quiet:
+                conti = input('\n > Proceed to template image... (return)')
+
+            tmp = fits.open(template)
+
+            try:
+                tmp[0].verify('fix')
+
+                data2 = tmp[0].data
+                header2 = tmp[0].header
+                checkdat2 = len(data2)
+                
+                tmp = tmp[0]
+
+            except:
+                tmp[1].verify('fix')
+
+                data2 = tmp[1].data
+                header2 = tmp[1].header
+                
+                tmp = tmp[1]
+
+
+            ### Using Reproject
+
+#            tmp_resampled, footprint = reproject_interp(tmp, header)
+#
+#            tmp_resampled[np.isnan(tmp_resampled)] = np.nanmedian(tmp_resampled)
+#
+#            hdu2 = fits.PrimaryHDU(tmp_resampled)
+#
+#            hdu2.writeto('tmpl_aligned.fits',overwrite=True)
+
+
+
+            ### Using Astroalign
+
+            im_fixed = np.array(data, dtype="<f4")
+            tmp_fixed = np.array(data2, dtype="<f4")
+    
+            registered, footprint = aa.register(tmp_fixed, im_fixed)
+    
+            tmp_masked = np.ma.masked_array(registered, footprint, fill_value=np.nanmedian(tmp_fixed)).filled()
+    
+            tmp_masked[np.isnan(tmp_masked)] = np.nanmedian(tmp_fixed)
+    
+            hdu2 = fits.PrimaryHDU(tmp_masked)
+    
+            hdu2.writeto('tmpl_aligned.fits',overwrite=True)
+            
+
+
+            fig2 = plt.figure(2,(14,7))
+            plt.clf()
+            plt.ion()
+            plt.show()
+
+            im2 = fits.open('tmpl_aligned.fits')
+
+            try:
+                im2[0].verify('fix')
+
+                data2 = im2[0].data
+                header2 = im2[0].header
+                checkdat2 = len(data2)
+
+            except:
+                im2[1].verify('fix')
+
+                data2 = im2[1].data
+                header2 = im2[1].header
+                
+            try:
+                gain2 = header2['GAIN']
+            except:
+                gain2 = 1.0
+
+            bkg2 = photutils.background.Background2D(data2,box_size=bkgbox)
+
+            data2 = data2.astype(float) - bkg2.background
+            
+            bkg_error2 = bkg2.background_rms
+
+            err_array2 = calc_total_error(data2, bkg_error2, gain2)
+
+
+            plt.subplots_adjust(left=0.05,right=0.99,top=0.99,bottom=-0.05)
+
+
+            ax1t = plt.subplot2grid((2,5),(0,0),colspan=2,rowspan=2)
+
+
+            ax1t.imshow(data2, origin='lower',cmap='gray',
+                        vmin=visualization.ZScaleInterval().get_limits(data2)[0],
+                        vmax=visualization.ZScaleInterval().get_limits(data2)[1])
+
+            ax1t.set_title(template)
+
+            ax1t.set_xlim(0,len(data2))
+            ax1t.set_ylim(0,len(data2))
+
+            ax1t.get_yaxis().set_visible(False)
+            ax1t.get_xaxis().set_visible(False)
+
+            axBKGt = plt.subplot2grid((2,5),(0,2))
+
+            axBKGt.imshow(bkg2.background, origin='lower',cmap='viridis')
+
+            axBKGt.tick_params(left = False, right = False, labelleft = False, labelbottom = False, bottom = False)
+
+            axBKGt.set_title('Background')
+
+
+            co2 = co.copy()
+
+            co2[:,0],co2[:,1] = photutils.centroids.centroid_sources(data2,co2[:,0],co2[:,1],
+                                        centroid_func=photutils.centroids.centroid_2dg)
+
+            psfinput2 = astropy.table.Table()
+            psfinput2['x'] = co2[:,0]
+            psfinput2['y'] = co2[:,1]
+
+
+
+            nddata2 = astropy.nddata.NDData(data=data2)
+
+
+            photaps2 = photutils.CircularAperture(co2, r=aprad)
+
+            photTab2 = photutils.aperture_photometry(data2, photaps2, err_array2)
+
+
+            print('\nBuilding template image PSF for subtraction')
+
+            aprad2 = aprad
+            psfthresh2 = psfthresh
+            samp2 = samp
+
+            # Create model from sequence stars
+            happy = 'n'
+            while happy not in ('y','yes'):
+
+                psfstars2 = photutils.psf.extract_stars(nddata2, psfinput2[photTab2['aperture_sum']>psfthresh2*photTab2['aperture_sum_err']], size=2*aprad2+5)
+                while(len(psfstars2))<3:
+                    print('Warning: too few PSF stars with threshold '+str(psfthresh2)+' sigma, trying lower sigma)')
+                    psfthresh2 -= 1
+                    psfstars2 = photutils.psf.extract_stars(nddata2, psfinput2[photTab2['aperture_sum']>psfthresh2*photTab2['aperture_sum_err']], size=2*aprad2+5)
+
+
+                ax1t.errorbar(psfstars2.center_flat[:,0],psfstars2.center_flat[:,1],fmt='*',mfc='none', markeredgecolor='lime',markeredgewidth=2, markersize=20,label='Used in PSF fit')
+                
+                
+                # build PSF
+                epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
+                                oversampling=samp2,smoothing_kernel='quadratic',shape=2*aprad-1)
+                epsf2, fitted_stars2 = epsf_builder(psfstars2)
+
+                psf2 = epsf2.data
+
+                ax2t = plt.subplot2grid((2,5),(0,3))
+
+                ax2t.imshow(psf2, origin='lower',cmap='gray',
+                            vmin=visualization.ZScaleInterval().get_limits(psf2)[0],
+                            vmax=visualization.ZScaleInterval().get_limits(psf2)[1])
+
+                ax2t.get_yaxis().set_visible(False)
+                ax2t.get_xaxis().set_visible(False)
+
+                ax2t.set_title('PSF')
+
+                plt.draw()
+
+                
+
+                ax3t = plt.subplot2grid((2,5),(0,4),projection='3d')
+
+                tmpArr2 = range(len(psf2))
+
+                X2, Y2 = np.meshgrid(tmpArr2,tmpArr2)
+
+                ax3t.plot_surface(X2,Y2,psf2,rstride=1,cstride=1,cmap='viridis_r',alpha=0.5)
+
+                ax3t.set_zlim(np.min(psf2),np.max(psf2)*1.1)
+
+                ax3t.set_axis_off()
+
+                plt.draw()
+
+                plt.tight_layout(pad=0.5)
+
+
+                if not quiet:
+                    happy = input('\nProceed with this template PSF? [y] ')
+                    if not happy: happy = 'y'
+                    if happy != 'y':
+                        aprad1 = input('Try new aperture radius: [' +str(aprad2)+']')
+                        if not aprad1: aprad1 = aprad2
+                        aprad2 = int(aprad1)
+                        
+                        psfthresh1 = input('Try new inclusion threshold: [' +str(psfthresh2)+' sigma]')
+                        if not psfthresh1: psfthresh1 = psfthresh2
+                        psfthresh2 = int(psfthresh1)
+                        
+                        samp1 = input('Try new PSF oversampling: [' +str(samp2)+']')
+                        if not samp1: samp1 = samp2
+                        samp2 = int(samp1)
+                else:
+                    happy = 'y'
+
+
+            tmppsf = fits.PrimaryHDU(psf2)
+            tmppsf.writeto('tmpl_psf.fits',overwrite=True)
+
+            
+            plt.close(fig2)
+            
+            
+            # Make cutouts for subtraction
+            
+            im_sci = fits.open(image)
+
+            try:
+                im_sci[0].verify('fix')
+
+                data_orig = im_sci[0].data
+                header_orig = im_sci[0].header
+                checkdat = len(data_orig)
+                
+                im_sci = im_sci[0]
+
+            except:
+                im_sci[1].verify('fix')
+
+                data_orig = im_sci[1].data
+                header_orig = im_sci[1].header
+                checkdat = len(data_orig)
+                
+                im_sci = im_sci[1]
+
+
+            wcs = astropy.wcs.WCS(header_orig)
+
+            cutoutsize = 1000
+
+            cutout = Cutout2D(data_orig, position=SNco, size=(cutoutsize,cutoutsize), wcs=wcs)
+
+            im_sci.data = cutout.data
+            im_sci.header.update(cutout.wcs.to_header())
+            im_sci.writeto('sci_trim.fits', overwrite=True)
+
+
+            im2 = fits.open('tmpl_aligned.fits')
+
+            try:
+                im2[0].verify('fix')
+
+                data2 = im2[0].data
+                checkdat2 = len(data2)
+
+                im2 = im2[0]
+
+            except:
+                im2[1].verify('fix')
+
+                data2 = im2[1].data
+                checkdat2 = len(data2)
+
+                im2 = im2[1]
+
+
+            cutout2 = Cutout2D(data2, position=SNco, size=(cutoutsize,cutoutsize), wcs=wcs)
+
+            im2.data = cutout2.data
+            im2.header.update(cutout2.wcs.to_header())
+            im2.writeto('tmpl_trim.fits', overwrite=True)
+
+            print('\nSubtracting template...')
+
+            im_sub = run_subtraction('sci_trim.fits','tmpl_trim.fits','sci_psf.fits',
+                'tmpl_psf.fits',normalization="science",n_stamps=4)
+            
+            im_sub = np.real(im_sub[0])
+            
+            im_sci.data = im_sub
+            im_sci.writeto('sub.fits', overwrite=True)
+        
+            data = im_sub
+            
+            bkg_new = photutils.background.Background2D(data,box_size=bkgbox)
+            
+            bkg_error = bkg_new.background_rms
+            
+            data -= bkg_new.background
+            
+            ax1.clear()
+            
+            ax1.imshow(data, origin='lower',cmap='gray',
+                        vmin=visualization.ZScaleInterval().get_limits(data)[0],
+                        vmax=visualization.ZScaleInterval().get_limits(data)[1])
+                        
+            ax1.errorbar(co[:,0]-(SNco[0]-cutoutsize/2.),co[:,1]-(SNco[1]-cutoutsize/2.), fmt='s',mfc='none',markeredgecolor='C0',markersize=8,markeredgewidth=1.5)
+
+
+
+            ax1.set_title('Template-subtracted cutout')
+
+            ax1.set_xlim(0,len(data))
+            ax1.set_ylim(0,len(data))
+
+            ax1.get_yaxis().set_visible(False)
+            ax1.get_xaxis().set_visible(False)
+
+            
+            SNco[0] = cutoutsize/2.
+            SNco[1] = cutoutsize/2.
+
+            ax1.errorbar(SNco[0],SNco[1],fmt='o',markeredgecolor='r',mfc='none',
+                            markeredgewidth=3,markersize=20)
 
     ########### SN photometry
 
@@ -841,15 +1442,14 @@ for f in usedfilters:
         skymask = skyap.to_mask(method='center')
 
         # Get median sky in annulus around transient
-        bkg_local = []
         skydata = skymask.multiply(data)
         skydata_1d = skydata[skymask.data > 0]
         meansky, mediansky, sigsky = astropy.stats.sigma_clipped_stats(skydata_1d)
-        bkg_local.append(mediansky)
-        bkg_local = np.array(bkg_local)
-        SNphotTab = photutils.aperture_photometry(data, photap)
+        bkg_local = np.array([mediansky])
+        err_array = calc_total_error(data, bkg_error, gain)
+        SNphotTab = photutils.aperture_photometry(data, photap, err_array)
         SNphotTab['local_sky'] = bkg_local
-        SNphotTab['aper_sum_sub'] = SNphotTab['aperture_sum'] - bkg_local * photap.area
+        SNphotTab['aperture_sum_sub'] = SNphotTab['aperture_sum'] - bkg_local * photap.area
 
         print('Aperture done')
 
@@ -857,7 +1457,7 @@ for f in usedfilters:
         SNcoordTable = astropy.table.Table()
         SNcoordTable['x_0'] = [SNco[0]]
         SNcoordTable['y_0'] = [SNco[1]]
-        SNcoordTable['flux_0'] = SNphotTab['aper_sum_sub']
+        SNcoordTable['flux_0'] = SNphotTab['aperture_sum_sub']
 
 #        epsf.x_0.fixed = True
 #        epsf.y_0.fixed = True
@@ -906,10 +1506,9 @@ for f in usedfilters:
 
         print('Converting flux to magnitudes...')
 
-        SNap = -2.5*np.log10(SNphotTab['aper_sum_sub'])
+        SNap = -2.5*np.log10(SNphotTab['aperture_sum_sub'])
         # aperture mag error assuming Poisson noise
-        errSNap = 0.92*abs(SNap * np.sqrt(SNphotTab['aper_sum_sub'] +
-                    (bkg.background_median+bkg_local)*photap.area) / SNphotTab['aper_sum_sub'] )
+        errSNap = 0.92*abs(SNphotTab['aperture_sum_err'] / SNphotTab['aperture_sum_sub'])
 
         try:
             SNpsf = -2.5*np.log10(SNpsfphotTab['flux_fit'])
@@ -955,12 +1554,27 @@ for f in usedfilters:
         if comment1:
             comment += (' // '+comment1)
 
-        outFile.write('\n'+image+'\t'+f+'\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t'
-                        %(mjd,calMagPsf,errMagPsf,calMagAp,errMagAp,ZP,errZP))
-        outFile.write(comment)
+        outFile.write('\n'+image+'\t'+f+'\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s'
+                        %(mjd,calMagPsf,errMagPsf,calMagAp,errMagAp,ZP,errZP,template,comment))
+#        outFile.write(comment)
 
 
 outFile.close()
 
 
 print('\n##########################################\nFinished!\nCalibrated PSF phot saved to ./PSF_phot.txt\nAperture photometry saved to ./ap_phot.txt\nCheck PSF_output/ for additional info\n##########################################')
+
+if not keep:
+    if os.path.exists('tmpl_aligned.fits'):
+        os.remove('tmpl_aligned.fits')
+    if os.path.exists('tmpl_trim.fits'):
+        os.remove('tmpl_trim.fits')
+    if os.path.exists('tmpl_psf.fits'):
+        os.remove('tmpl_psf.fits')
+    if os.path.exists('sci_trim.fits'):
+        os.remove('sci_trim.fits')
+    if os.path.exists('sci_psf.fits'):
+        os.remove('sci_psf.fits')
+    if os.path.exists('sub.fits'):
+        os.remove('sub.fits')
+
