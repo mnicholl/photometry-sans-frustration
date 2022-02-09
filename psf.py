@@ -1232,7 +1232,7 @@ for f in usedfilters:
                 
                 # build PSF
                 epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
-                                oversampling=samp2,smoothing_kernel='quadratic',shape=2*aprad-1)
+                                oversampling=samp2,smoothing_kernel='quadratic',shape=2*aprad2-1)
                 epsf2, fitted_stars2 = epsf_builder(psfstars2)
 
                 psf2 = epsf2.data
