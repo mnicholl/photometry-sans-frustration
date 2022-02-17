@@ -96,35 +96,38 @@ warnings.filterwarnings("ignore")
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--ims','-i', dest='file_to_reduce', default='', nargs='+',
-                    help='List of files to reduce. Accepts wildcards or '
-                    'space-delimited list.')
+                    help='List of files to reduce (accepts wildcards or '
+                    'space-delimited list)')
 
 parser.add_argument('--magmin', dest='magmin', default=20.5, type=float,
-                    help='Faintest sequence stars to use ')
+                    help='Faintest sequence stars to use')
 
 parser.add_argument('--magmax', dest='magmax', default=16.5, type=float,
-                    help='Brightest sequence stars to use ')
+                    help='Brightest sequence stars to use')
 
 parser.add_argument('--shifts', dest='shifts', default=False, action='store_true',
-                    help='Apply manual shifts if WCS is a bit off ')
+                    help='Apply manual shifts if WCS is a bit off')
 
-parser.add_argument('--ap', dest='aprad', default=15, type=int,
-                    help='Radius for aperture/PSF phot.')
+parser.add_argument('--aprad', dest='aprad', default=15, type=int,
+                    help='Radius for aperture photometry')
 
-parser.add_argument('--sky', dest='skyrad', default=5, type=int,
-                    help='Width of annulus for sky background.')
+parser.add_argument('--stamprad', dest='stamprad', default=15, type=int,
+                    help='Radius for PSF extraction')
+                    
+parser.add_argument('--skyrad', dest='skyrad', default=5, type=int,
+                    help='Width of annulus for sky background')
 
-parser.add_argument('--box', dest='bkgbox', default=500, type=int,
-                    help='Size of stamps for background fit.')
+parser.add_argument('--box', dest='bkgbox', default=100, type=int,
+                    help='Size of stamps for background fit')
 
 parser.add_argument('--psfthresh', dest='psfthresh', default=20., type=float,
-                    help='SNR threshold for inclusion in PSF model.')
+                    help='SNR threshold for inclusion in PSF model')
 
 parser.add_argument('--zpsig', dest='sigClip', default=1, type=int,
-                    help='Sigma clipping for rejecting sequence stars.')
+                    help='Sigma clipping for rejecting sequence stars')
 
 parser.add_argument('--samp', dest='samp', default=1, type=int,
-                    help='Oversampling factor for PSF build.')
+                    help='Oversampling factor for PSF build')
 
 parser.add_argument('--quiet', dest='quiet', default=False, action='store_true',
                     help='Run with no user prompts')
@@ -134,6 +137,15 @@ parser.add_argument('--stack', dest='stack', default=False, action='store_true',
 
 parser.add_argument('--sub', dest='sub', default=False, action='store_true',
                     help='Subtract template images')
+
+parser.add_argument('--cut', dest='cut', default=1000, type=int,
+                    help='Cutout size for image subtraction')
+
+parser.add_argument('--sci-sat', dest='sci_sat', default=40000, type=int,
+                    help='Max valid science pixel value for image subtraction')
+
+parser.add_argument('--tmpl-sat', dest='tmpl_sat', default=40000, type=int,
+                    help='Max valid template pixel value for image subtraction')
 
 parser.add_argument('--keep', dest='keep', default=False, action='store_true',
                     help='Keep intermediate products')
@@ -147,6 +159,7 @@ magmin = args.magmin
 magmax = args.magmax
 shifts = args.shifts
 aprad = args.aprad
+stamprad = args.stamprad
 skyrad = args.skyrad
 bkgbox = args.bkgbox
 psfthresh = args.psfthresh
@@ -155,6 +168,9 @@ samp = args.samp
 quiet = args.quiet
 stack = args.stack
 sub = args.sub
+cutoutsize = args.cut
+tmpl_sat = args.tmpl_sat
+sci_sat = args.sci_sat
 keep = args.keep
 
 ims = [i for i in args.file_to_reduce]
@@ -373,7 +389,7 @@ filtSyn = {'u':['u','SDSS-U','up','up1','U640','F336W','Sloan_u','u_Sloan'],
 
 # UPDATE WITH QUIRKS OF MORE TELESCOPES...
 
-filtAll = 'ugrizUBVRIJHK'
+filtAll = 'u,g,r,i,z,U,B,V,R,I,J,H,K'
 
 
 
@@ -386,8 +402,9 @@ outdir = 'PSF_output_'+str(int(time.time()))
 if not os.path.exists(outdir): os.makedirs(outdir)
 
 # A file to write final magnitudes
-outFile = open(os.path.join(outdir,'PSF_phot_'+str(len(glob.glob(os.path.join(outdir,'PSF_phot_*'))))+'.txt'),'w')
-outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tZP\terr\ttemplate\tcomments')
+results_filename = os.path.join(outdir,'PSF_phot.txt')
+outFile = open(results_filename,'w')
+outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tLimit\tZP\terr\ttemplate\tcomments')
 
 
 
@@ -714,7 +731,7 @@ for f in usedfilters:
         co = co[mag_range]
 
         # Remove any stars falling outside the image or too close to edge
-        inframe = (co[:,0]>2*aprad)&(co[:,0]<len(data[0])-2*aprad)&(co[:,1]>2*aprad)&(co[:,1]<len(data)-2*aprad)
+        inframe = (co[:,0]>aprad)&(co[:,0]<len(data[0])-aprad)&(co[:,1]>aprad)&(co[:,1]<len(data)-aprad)
         co = co[inframe]
 
         # Find and remove bad pixels and sequence stars: nans, regions of zero etc.
@@ -852,16 +869,17 @@ for f in usedfilters:
         psfinput['x'] = co[:,0]
         psfinput['y'] = co[:,1]
 
+
         # Create model from sequence stars
         happy = 'n'
         while happy not in ('y','yes'):
-
+        
             # extract stars from image
-            psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*aprad+5)
+            psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*stamprad+5)
             while(len(psfstars))<3:
                 print('Warning: too few PSF stars with threshold '+str(psfthresh)+' sigma, trying lower sigma)')
                 psfthresh -= 1
-                psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*aprad+5)
+                psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*stamprad+5)
 
             ax1.clear()
             
@@ -890,10 +908,21 @@ for f in usedfilters:
 
             # build PSF
             epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
-                            oversampling=samp,smoothing_kernel='quadratic',shape=2*aprad-1)
+                            oversampling=samp,smoothing_kernel='quadratic',shape=2*stamprad-1)
             epsf, fitted_stars = epsf_builder(psfstars)
 
             psf = epsf.data
+            
+            # determine aperture size and correction
+            
+#            pix_frac = 0.5 # Optimal radius for S/N ~ FWHM. But leads to large aperture correction
+            pix_frac = 0.1 # Aperture containing 90% of flux. Typically gives a radius ~ 2*FWHM
+            
+            aprad_opt = np.sqrt(len(psf[psf>np.max(psf)*pix_frac])/np.pi) # radius of aperture including pixels within 90% of peak flux - tests show this means within R <~ 2*FWHM
+            ap_frac = np.sum(psf[psf>np.max(psf)*pix_frac])/np.sum(psf) # fraction of flux contained in aprad_opt
+
+            ap_corr = 2.5*np.log10(ap_frac)
+
 
             ax2 = plt.subplot2grid((2,5),(0,3))
 
@@ -930,10 +959,10 @@ for f in usedfilters:
                 happy = input('\nProceed with this PSF? [y] ')
                 if not happy: happy = 'y'
                 if happy not in ('y','yes'):
-                    aprad1 = input('Try new aperture radius: [' +str(aprad)+']')
-                    if not aprad1: aprad1 = aprad
-                    aprad = int(aprad1)
-                    
+                    stamprad1 = input('Try new cutout radius: [' +str(stamprad)+']')
+                    if not stamprad1: stamprad1 = stamprad
+                    stamprad = int(stamprad1)
+
                     psfthresh1 = input('Try new inclusion threshold: [' +str(psfthresh)+' sigma]')
                     if not psfthresh1: psfthresh1 = psfthresh
                     psfthresh = int(psfthresh1)
@@ -959,12 +988,12 @@ for f in usedfilters:
         grouper = photutils.psf.DAOGroup(crit_separation=aprad)
 
         # need an odd number of pixels to fit PSF
-        fitrad = 2*aprad + 1
+        fitrad = 2*stamprad + 1
 
         psfphot = photutils.psf.BasicPSFPhotometry(group_maker=grouper,
                         bkg_estimator=photutils.background.MMMBackground(),
                         psf_model=epsf, fitshape=fitrad,
-                        finder=None, aperture_radius=aprad)
+                        finder=None, aperture_radius=min(stamprad,2*aprad_opt))
 
         psfphotTab = psfphot.do_photometry(data, init_guesses=psfcoordTable)
 
@@ -1212,7 +1241,7 @@ for f in usedfilters:
 
             print('\nBuilding template image PSF for subtraction')
 
-            aprad2 = aprad
+            stamprad2 = stamprad
             psfthresh2 = psfthresh
             samp2 = samp
 
@@ -1220,11 +1249,11 @@ for f in usedfilters:
             happy = 'n'
             while happy not in ('y','yes'):
 
-                psfstars2 = photutils.psf.extract_stars(nddata2, psfinput2[photTab2['aperture_sum']>psfthresh2*photTab2['aperture_sum_err']], size=2*aprad2+5)
+                psfstars2 = photutils.psf.extract_stars(nddata2, psfinput2[photTab2['aperture_sum']>psfthresh2*photTab2['aperture_sum_err']], size=2*stamprad2+5)
                 while(len(psfstars2))<3:
                     print('Warning: too few PSF stars with threshold '+str(psfthresh2)+' sigma, trying lower sigma)')
                     psfthresh2 -= 1
-                    psfstars2 = photutils.psf.extract_stars(nddata2, psfinput2[photTab2['aperture_sum']>psfthresh2*photTab2['aperture_sum_err']], size=2*aprad2+5)
+                    psfstars2 = photutils.psf.extract_stars(nddata2, psfinput2[photTab2['aperture_sum']>psfthresh2*photTab2['aperture_sum_err']], size=2*stamprad2+5)
 
 
                 ax1t.errorbar(psfstars2.center_flat[:,0],psfstars2.center_flat[:,1],fmt='*',mfc='none', markeredgecolor='lime',markeredgewidth=2, markersize=20,label='Used in PSF fit')
@@ -1232,7 +1261,7 @@ for f in usedfilters:
                 
                 # build PSF
                 epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
-                                oversampling=samp2,smoothing_kernel='quadratic',shape=2*aprad2-1)
+                                oversampling=samp2,smoothing_kernel='quadratic',shape=2*stamprad2-1)
                 epsf2, fitted_stars2 = epsf_builder(psfstars2)
 
                 psf2 = epsf2.data
@@ -1273,10 +1302,10 @@ for f in usedfilters:
                     happy = input('\nProceed with this template PSF? [y] ')
                     if not happy: happy = 'y'
                     if happy != 'y':
-                        aprad1 = input('Try new aperture radius: [' +str(aprad2)+']')
-                        if not aprad1: aprad1 = aprad2
-                        aprad2 = int(aprad1)
-                        
+                        stamprad1 = input('Try new cutout radius: [' +str(stamprad2)+']')
+                        if not stamprad1: stamprad1 = stamprad2
+                        stamprad2 = int(stamprad1)
+
                         psfthresh1 = input('Try new inclusion threshold: [' +str(psfthresh2)+' sigma]')
                         if not psfthresh1: psfthresh1 = psfthresh2
                         psfthresh2 = int(psfthresh1)
@@ -1320,8 +1349,6 @@ for f in usedfilters:
 
             wcs = astropy.wcs.WCS(header_orig)
 
-            cutoutsize = 1000
-
             cutout = Cutout2D(data_orig, position=SNco, size=(cutoutsize,cutoutsize), wcs=wcs)
 
             im_sci.data = cutout.data
@@ -1348,6 +1375,8 @@ for f in usedfilters:
                 im2 = im2[1]
 
 
+#            try:
+
             cutout2 = Cutout2D(data2, position=SNco, size=(cutoutsize,cutoutsize), wcs=wcs)
 
             im2.data = cutout2.data
@@ -1357,7 +1386,28 @@ for f in usedfilters:
             print('\nSubtracting template...')
 
             im_sub = run_subtraction('sci_trim.fits','tmpl_trim.fits','sci_psf.fits',
-                'tmpl_psf.fits',normalization="science",n_stamps=4)
+            'tmpl_psf.fits',normalization="science",n_stamps=4,science_saturation=sci_sat, reference_saturation=tmpl_sat)
+                
+#            except:
+#                print('Too few good pixels in cutout area')
+#
+#                cutoutsize1 = input('Try larger cutout size? ['+str(cutoutsize)+']')
+#                if not cutoutsize1: cutoutsize1 = cutoutsize
+#                cutoutsize = int(cutoutsize1)
+#
+#                tmpl_sat1 = input('Try lower template saturation? ['+str(tmpl_sat)+']')
+#                if not tmpl_sat1: tmpl_sat1 = tmpl_sat
+#                tmpl_sat = int(tmpl_sat1)
+#
+#                sci_sat1 = input('Try lower science saturation? ['+str(sci_sat)+']')
+#                if not sci_sat1: sci_sat1 = sci_sat
+#                sci_sat = int(sci_sat1)
+#
+#
+#                im_sub = run_subtraction('sci_trim.fits','tmpl_trim.fits','sci_psf.fits',
+#                'tmpl_psf.fits',normalization="science",n_stamps=4,science_saturation=sci_sat, reference_saturation=tmpl_sat)
+
+            
             
             im_sub = np.real(im_sub[0])
             
@@ -1366,7 +1416,11 @@ for f in usedfilters:
         
             data = im_sub
             
-            bkg_new = photutils.background.Background2D(data,box_size=bkgbox)
+            try:
+                bkg_new = photutils.background.Background2D(data,box_size=bkgbox)
+            except:
+                bkg_new = photutils.background.Background2D(data,box_size=int(cutoutsize/4),exclude_percentile=0)
+
             
             bkg_error = bkg_new.background_rms
             
@@ -1425,19 +1479,22 @@ for f in usedfilters:
 
         ax4.set_title('Target')
 
-        apcircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+        apcircle = Circle((SNco[0], SNco[1]), aprad_opt, facecolor='none',
                 edgecolor='r', linewidth=3, alpha=1)
         ax4.add_patch(apcircle)
 
-        skycircle = Circle((SNco[0], SNco[1]), aprad+skyrad, facecolor='none',
-                edgecolor='r', linewidth=3, alpha=1)
-        ax4.add_patch(skycircle)
+        skycircle1 = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+                edgecolor='r', linewidth=2, alpha=1)
+        skycircle2 = Circle((SNco[0], SNco[1]), aprad+skyrad, facecolor='none',
+                edgecolor='r', linewidth=2, alpha=1)
+        ax4.add_patch(skycircle1)
+        ax4.add_patch(skycircle2)
 
         plt.draw()
 
 
         # apertures
-        photap = photutils.CircularAperture(SNco, r=aprad)
+        photap = photutils.CircularAperture(SNco, r=aprad_opt)
         skyap = photutils.CircularAnnulus(SNco, r_in=aprad, r_out=aprad+skyrad)
         skymask = skyap.to_mask(method='center')
 
@@ -1464,7 +1521,7 @@ for f in usedfilters:
         psfphot = photutils.psf.BasicPSFPhotometry(group_maker=grouper,
                         bkg_estimator=photutils.background.MMMBackground(),
                         psf_model=epsf, fitshape=fitrad,
-                        finder=None, aperture_radius=aprad)
+                        finder=None, aperture_radius=min(stamprad,2*aprad_opt))
 
         SNpsfphotTab = psfphot.do_photometry(data, init_guesses=SNcoordTable)
 
@@ -1487,13 +1544,16 @@ for f in usedfilters:
 
         ax5.set_title('PSF subtracted')
 
-        apcircle = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+        apcircle = Circle((SNco[0], SNco[1]), aprad_opt, facecolor='none',
                 edgecolor='r', linewidth=3, alpha=1)
         ax5.add_patch(apcircle)
 
-        skycircle = Circle((SNco[0], SNco[1]), aprad+skyrad, facecolor='none',
-                edgecolor='r', linewidth=3, alpha=1)
-        ax5.add_patch(skycircle)
+        skycircle1 = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+                edgecolor='r', linewidth=2, alpha=1)
+        skycircle2 = Circle((SNco[0], SNco[1]), aprad+skyrad, facecolor='none',
+                edgecolor='r', linewidth=2, alpha=1)
+        ax5.add_patch(skycircle1)
+        ax5.add_patch(skycircle2)
 
         plt.draw()
 
@@ -1506,9 +1566,11 @@ for f in usedfilters:
 
         print('Converting flux to magnitudes...')
 
-        SNap = -2.5*np.log10(SNphotTab['aperture_sum_sub'])
+        SNap = -2.5*np.log10(SNphotTab['aperture_sum_sub']) + ap_corr
         # aperture mag error assuming Poisson noise
         errSNap = 0.92*abs(SNphotTab['aperture_sum_err'] / SNphotTab['aperture_sum_sub'])
+        
+        ulim = -2.5*np.log10(3*SNphotTab['aperture_sum_err']) + ap_corr
 
         try:
             SNpsf = -2.5*np.log10(SNpsfphotTab['flux_fit'])
@@ -1530,6 +1592,8 @@ for f in usedfilters:
             calMagAp = SNap + ZP
 
             errMagAp = np.sqrt(errSNap**2 + errZP**2)
+            
+            calMagLim = ulim + ZP
 
         else:
             calMagPsf = SNpsf
@@ -1540,12 +1604,15 @@ for f in usedfilters:
             calMagAp = SNap
 
             errMagAp = errSNap
+            
+            calMagLim = ulim
 
             comment1 = 'instrumental mag only'
 
 
         print('> PSF mag = '+'%.2f +/- %.2f' %(calMagPsf,errMagPsf))
         print('> Aperture mag = '+'%.2f +/- %.2f' %(calMagAp,errMagAp))
+        print('> Limiting mag = '+'%.2f (3 sigma)' %(calMagLim))
 
         comment = ''
         if not quiet:
@@ -1554,15 +1621,16 @@ for f in usedfilters:
         if comment1:
             comment += (' // '+comment1)
 
-        outFile.write('\n'+image+'\t'+f+'\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s'
-                        %(mjd,calMagPsf,errMagPsf,calMagAp,errMagAp,ZP,errZP,template,comment))
+        outFile.write('\n'+image+'\t'+f+'\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s'
+                        %(mjd,calMagPsf,errMagPsf,calMagAp,errMagAp,calMagLim,ZP,errZP,template,comment))
 #        outFile.write(comment)
 
 
 outFile.close()
 
 
-print('\n##########################################\nFinished!\nCalibrated PSF phot saved to ./PSF_phot.txt\nAperture photometry saved to ./ap_phot.txt\nCheck PSF_output/ for additional info\n##########################################')
+
+print('\n##########################################\nFinished!\nResults saved to \n'+results_filename+ '\n##########################################')
 
 if not keep:
     if os.path.exists('tmpl_aligned.fits'):
