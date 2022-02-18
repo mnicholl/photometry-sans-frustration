@@ -150,6 +150,8 @@ parser.add_argument('--tmpl-sat', dest='tmpl_sat', default=40000, type=int,
 parser.add_argument('--keep', dest='keep', default=False, action='store_true',
                     help='Keep intermediate products')
 
+parser.add_argument('--force-ap', dest='force_ap', default=False, action='store_true',
+                    help='Use fixed aperture size')
 
 
 
@@ -172,6 +174,7 @@ cutoutsize = args.cut
 tmpl_sat = args.tmpl_sat
 sci_sat = args.sci_sat
 keep = args.keep
+forced = args.force_ap
 
 ims = [i for i in args.file_to_reduce]
 
@@ -683,12 +686,15 @@ for f in usedfilters:
     else:
         ims2 = ims1.copy()
 
+    counter = 1
+
     for image in ims2:
     
         plt.clf()
 
-
-        print('\n> Image: '+image)
+        print('\n> Image: '+image+'  (number %d of %d in filter)' %(counter,len(ims2)))
+        
+        counter += 1
 
         if image == 'stack_'+f+'.fits':
             mjd = fits.getval(filename='stack_'+f+'.fits',keyword='MJD')
@@ -915,7 +921,7 @@ for f in usedfilters:
             
             # determine aperture size and correction
             
-#            pix_frac = 0.5 # Optimal radius for S/N ~ FWHM. But leads to large aperture correction
+#            pix_frac = 0.5 # Optimal radius for S/N is R ~ FWHM. But leads to large aperture correction
             pix_frac = 0.1 # Aperture containing 90% of flux. Typically gives a radius ~ 2*FWHM
             
             aprad_opt = np.sqrt(len(psf[psf>np.max(psf)*pix_frac])/np.pi) # radius of aperture including pixels within 90% of peak flux - tests show this means within R <~ 2*FWHM
@@ -1574,7 +1580,7 @@ for f in usedfilters:
 
         try:
             SNpsf = -2.5*np.log10(SNpsfphotTab['flux_fit'])
-            errSNpsf = 0.92*abs(SNpsf * SNpsfphotTab['flux_unc']/SNpsfphotTab['flux_fit'])
+            errSNpsf = 0.92*abs(SNpsfphotTab['flux_unc']/SNpsfphotTab['flux_fit'])
         except:
             SNpsf = np.nan
             errSNpsf = np.nan
@@ -1591,7 +1597,7 @@ for f in usedfilters:
 
             calMagAp = SNap + ZP
 
-            errMagAp = np.sqrt(errSNap**2 + errZP**2)
+            errMagAp = np.sqrt(errSNap**2 + errZP**2 + (0.1*ap_corr)**2)
             
             calMagLim = ulim + ZP
 
