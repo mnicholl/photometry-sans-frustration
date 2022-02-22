@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-version = '1.0'
+version = '1.1'
 
 '''
     PSF: PHOTOMETRY SANS FRUSTRATION
@@ -181,6 +181,19 @@ ims = [i for i in args.file_to_reduce]
 # If no images provided, run on all images in directory
 if len(ims) == 0:
     ims = glob.glob('*.fits')
+    if 'tmpl_aligned.fits' in ims:
+        ims.remove('tmpl_aligned.fits')
+    if 'tmpl_trim.fits' in ims:
+        ims.remove('tmpl_trim.fits')
+    if 'tmpl_psf.fits' in ims:
+        ims.remove('tmpl_psf.fits')
+    if 'sci_trim.fits' in ims:
+        ims.remove('sci_trim.fits')
+    if 'sci_psf.fits' in ims:
+        ims.remove('sci_psf.fits')
+    if 'sub.fits' in ims:
+        ims.remove('sub.fits')
+
 
 
 ##################################################
