@@ -84,6 +84,7 @@ import astroalign as aa
 #from reproject import reproject_interp
 from PyZOGY.subtract import run_subtraction
 from photutils.utils import calc_total_error
+from photutils.psf import IntegratedGaussianPRF
 import warnings
 
 
@@ -123,6 +124,9 @@ parser.add_argument('--box', dest='bkgbox', default=100, type=int,
 parser.add_argument('--psfthresh', dest='psfthresh', default=20., type=float,
                     help='SNR threshold for inclusion in PSF model')
 
+parser.add_argument('--sigma', dest='sigma_gauss', default=2., type=float,
+                    help='Sigma for basic Gaussian PSF (used when insufficient stars)')
+
 parser.add_argument('--zpsig', dest='sigClip', default=1, type=int,
                     help='Sigma clipping for rejecting sequence stars')
 
@@ -150,10 +154,6 @@ parser.add_argument('--tmpl-sat', dest='tmpl_sat', default=40000, type=int,
 parser.add_argument('--keep', dest='keep', default=False, action='store_true',
                     help='Keep intermediate products')
 
-parser.add_argument('--force-ap', dest='force_ap', default=False, action='store_true',
-                    help='Use fixed aperture size')
-
-
 
 args = parser.parse_args()
 
@@ -161,12 +161,13 @@ magmin = args.magmin
 magmax = args.magmax
 shifts = args.shifts
 aprad = args.aprad
-stamprad = args.stamprad
+stamprad0 = args.stamprad
 skyrad = args.skyrad
 bkgbox = args.bkgbox
-psfthresh = args.psfthresh
+psfthresh0 = args.psfthresh
+sigma_gauss_0 = args.sigma_gauss
 sigClip = args.sigClip
-samp = args.samp
+samp0 = args.samp
 quiet = args.quiet
 stack = args.stack
 sub = args.sub
@@ -174,7 +175,6 @@ cutoutsize = args.cut
 tmpl_sat = args.tmpl_sat
 sci_sat = args.sci_sat
 keep = args.keep
-forced = args.force_ap
 
 ims = [i for i in args.file_to_reduce]
 
@@ -407,7 +407,7 @@ if not os.path.exists(outdir): os.makedirs(outdir)
 # A file to write final magnitudes
 results_filename = os.path.join(outdir,'PSF_phot.txt')
 outFile = open(results_filename,'w')
-outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tLimit\tZP\terr\ttemplate\tcomments')
+outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tAPmag_opt\terr\tLimit\tZP\terr\ttemplate\tcomments')
 
 
 
@@ -539,7 +539,8 @@ filtertab = np.array(filtertab)
 
 
 #################################
-# Part three: do some photometry
+# Part three: match templates and
+#          stack images if needed
 #################################
 
 for f in usedfilters:
@@ -680,15 +681,23 @@ for f in usedfilters:
 
         print('Done')
 
-        ### NEED TO MAKE COMPATIBLE WITH NAMES OF IMAGE IN SUBTRACTION PART
-
         ims2 = ['stack_'+f+'.fits']
     else:
         ims2 = ims1.copy()
 
     counter = 1
+    
+    
+#################################
+# Part four: do some photometry
+#################################
 
     for image in ims2:
+    
+        # PSF parameters that can be changed each time
+        stamprad = stamprad0
+        psfthresh = psfthresh0
+        samp = samp0
     
         plt.clf()
 
@@ -737,7 +746,7 @@ for f in usedfilters:
         co = co[mag_range]
 
         # Remove any stars falling outside the image or too close to edge
-        inframe = (co[:,0]>aprad)&(co[:,0]<len(data[0])-aprad)&(co[:,1]>aprad)&(co[:,1]<len(data)-aprad)
+        inframe = (co[:,0]>stamprad)&(co[:,0]<len(data[0])-stamprad)&(co[:,1]>stamprad)&(co[:,1]<len(data)-stamprad)
         co = co[inframe]
 
         # Find and remove bad pixels and sequence stars: nans, regions of zero etc.
@@ -885,6 +894,9 @@ for f in usedfilters:
             while(len(psfstars))<3:
                 print('Warning: too few PSF stars with threshold '+str(psfthresh)+' sigma, trying lower sigma)')
                 psfthresh -= 1
+                if psfthresh < 3:
+                    empirical = False
+                    break
                 psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*stamprad+5)
 
             ax1.clear()
@@ -913,18 +925,108 @@ for f in usedfilters:
 
 
             # build PSF
-            epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
-                            oversampling=samp,smoothing_kernel='quadratic',shape=2*stamprad-1)
-            epsf, fitted_stars = epsf_builder(psfstars)
+            try:
+                epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
+                                oversampling=samp,smoothing_kernel='quadratic',shape=2*stamprad-1)
+                epsf, fitted_stars = epsf_builder(psfstars)
 
-            psf = epsf.data
+                psf = epsf.data
+                
+                # determine aperture size and correction
+                
+    #            pix_frac = 0.5 # Optimal radius for S/N is R ~ FWHM. But leads to large aperture correction
+                pix_frac = 0.1 # Aperture containing 90% of flux. Typically gives a radius ~ 2*FWHM
+                
+                aprad_opt = np.sqrt(len(psf[psf>np.max(psf)*pix_frac])/np.pi)
+                
+                ap_frac = np.sum(psf[psf>np.max(psf)*pix_frac])/np.sum(psf) # fraction of flux contained in aprad_opt
+
+                ap_corr = 2.5*np.log10(ap_frac)
+
+
+                ax2 = plt.subplot2grid((2,5),(0,3))
+
+                ax2.imshow(psf, origin='lower',cmap='gray',
+                            vmin=visualization.ZScaleInterval().get_limits(psf)[0],
+                            vmax=visualization.ZScaleInterval().get_limits(psf)[1])
+
+                ax2.get_yaxis().set_visible(False)
+                ax2.get_xaxis().set_visible(False)
+
+                ax2.set_title('PSF')
+
+                plt.draw()
+
+
+                ax3 = plt.subplot2grid((2,5),(0,4),projection='3d')
+
+                tmpArr = range(len(psf))
+
+                X, Y = np.meshgrid(tmpArr,tmpArr)
+
+                ax3.plot_surface(X,Y,psf,rstride=1,cstride=1,cmap='viridis_r',alpha=0.5)
+
+                ax3.set_zlim(np.min(psf),np.max(psf)*1.1)
+
+                ax3.set_axis_off()
+
+                plt.draw()
+
+                plt.tight_layout(pad=0.5)
+                
+                empirical = True
+                
+                
+            except:
+                print('PSF fit failed (usually a weird EPSF_builder error):\nTrying different stamp size usually fixes!')
+                empirical = False
+
+
+            if not quiet:
+                if empirical == True:
+                    happy = input('\nProceed with this PSF? [y] ')
+                    if not happy: happy = 'y'
+                else:
+                    happy = input('\nProceed with simple Gaussian (y) or try varying parameters (n)? [n] ')
+                    if not happy: happy = 'n'
+                if happy not in ('y','yes'):
+                    stamprad1 = input('Try new cutout radius: [' +str(stamprad)+'] ')
+                    if not stamprad1: stamprad1 = stamprad
+                    stamprad = int(stamprad1)
+
+                    psfthresh1 = input('Try new inclusion threshold: [' +str(psfthresh)+' sigma] ')
+                    if not psfthresh1: psfthresh1 = psfthresh
+                    psfthresh = int(psfthresh1)
+                    
+                    samp1 = input('Try new PSF oversampling: [' +str(samp)+'] ')
+                    if not samp1: samp1 = samp
+                    samp = int(samp1)
+            else:
+                happy = 'y'
+                
+                
+        if empirical == False:
+            print('\nNo PSF determined, using basic Gaussian model')
+            
+            sigma_gauss = input('Please specify width (sigma) in pixels ['+str(sigma_gauss_0)+'] ')
+            if not sigma_gauss: sigma_gauss = sigma_gauss_0
+            sigma_gauss = float(sigma_gauss)
+            
+            epsf = IntegratedGaussianPRF(sigma=sigma_gauss)
+            
+            psf = np.zeros((2*stamprad+1,2*stamprad+1))
+            
+            for xt in np.arange(2*stamprad+1):
+                for yt in np.arange(2*stamprad+1):
+                    psf[xt,yt] = epsf.evaluate(xt,yt,x_0=stamprad,y_0=stamprad,sigma=sigma_gauss,flux=1)
             
             # determine aperture size and correction
             
 #            pix_frac = 0.5 # Optimal radius for S/N is R ~ FWHM. But leads to large aperture correction
             pix_frac = 0.1 # Aperture containing 90% of flux. Typically gives a radius ~ 2*FWHM
             
-            aprad_opt = np.sqrt(len(psf[psf>np.max(psf)*pix_frac])/np.pi) # radius of aperture including pixels within 90% of peak flux - tests show this means within R <~ 2*FWHM
+            aprad_opt = np.sqrt(len(psf[psf>np.max(psf)*pix_frac])/np.pi)
+            
             ap_frac = np.sum(psf[psf>np.max(psf)*pix_frac])/np.sum(psf) # fraction of flux contained in aprad_opt
 
             ap_corr = 2.5*np.log10(ap_frac)
@@ -960,25 +1062,7 @@ for f in usedfilters:
 
             plt.tight_layout(pad=0.5)
 
-
-            if not quiet:
-                happy = input('\nProceed with this PSF? [y] ')
-                if not happy: happy = 'y'
-                if happy not in ('y','yes'):
-                    stamprad1 = input('Try new cutout radius: [' +str(stamprad)+']')
-                    if not stamprad1: stamprad1 = stamprad
-                    stamprad = int(stamprad1)
-
-                    psfthresh1 = input('Try new inclusion threshold: [' +str(psfthresh)+' sigma]')
-                    if not psfthresh1: psfthresh1 = psfthresh
-                    psfthresh = int(psfthresh1)
                     
-                    samp1 = input('Try new PSF oversampling: [' +str(samp)+']')
-                    if not samp1: samp1 = samp
-                    samp = int(samp1)
-            else:
-                happy = 'y'
-                
                 
         scipsf = fits.PrimaryHDU(psf)
         scipsf.writeto('sci_psf.fits',overwrite=True)
@@ -991,7 +1075,7 @@ for f in usedfilters:
         psfcoordTable['y_0'] = co[:,1]
         psfcoordTable['flux_0'] = photTab['aperture_sum']
 
-        grouper = photutils.psf.DAOGroup(crit_separation=aprad)
+        grouper = photutils.psf.DAOGroup(crit_separation=stamprad)
 
         # need an odd number of pixels to fit PSF
         fitrad = 2*stamprad + 1
@@ -1044,7 +1128,7 @@ for f in usedfilters:
 
                 axZP.scatter(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2], zpList1,color='r')
 
-                zp1 = np.nanmean(zpList1)
+                zp1 = np.nanmedian(zpList1)
                 errzp1 = np.nanstd(zpList1)
 
                 print('\nInitial zeropoint =  %.2f +/- %.2f\n' %(zp1,errzp1))
@@ -1067,7 +1151,7 @@ for f in usedfilters:
 
                 zpList = seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags] - seqIm[mag_range_2][checkMags]
 
-                ZP = np.mean(zpList)
+                ZP = np.median(zpList)
                 errZP = np.std(zpList)/np.sqrt(len(zpList))
                 
                 axZP.scatter(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags], zpList,color='k')
@@ -1091,11 +1175,11 @@ for f in usedfilters:
                     happy = input('\nProceed with this zeropoint? [y] ')
                     if not happy: happy = 'y'
                     if happy not in ('y','yes'):
-                        magmax1 = input('Use new maximum mag: [' +str(magmax2)+']')
+                        magmax1 = input('Use new maximum mag: [' +str(magmax2)+'] ')
                         if not magmax1: magmax1 = magmax2
                         magmax2 = float(magmax1)
                                                 
-                        magmin1 = input('Use new minimum mag: [' +str(magmin2)+']')
+                        magmin1 = input('Use new minimum mag: [' +str(magmin2)+'] ')
                         if not magmin1: magmin1 = magmin2
                         magmin2 = float(magmin1)
                 else:
@@ -1266,46 +1350,58 @@ for f in usedfilters:
                 
                 
                 # build PSF
-                epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
-                                oversampling=samp2,smoothing_kernel='quadratic',shape=2*stamprad2-1)
-                epsf2, fitted_stars2 = epsf_builder(psfstars2)
+                try:
+                    epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
+                                    oversampling=samp2,smoothing_kernel='quadratic',shape=2*stamprad2-1)
+                    epsf2, fitted_stars2 = epsf_builder(psfstars2)
 
-                psf2 = epsf2.data
+                    psf2 = epsf2.data
 
-                ax2t = plt.subplot2grid((2,5),(0,3))
+                    ax2t = plt.subplot2grid((2,5),(0,3))
 
-                ax2t.imshow(psf2, origin='lower',cmap='gray',
-                            vmin=visualization.ZScaleInterval().get_limits(psf2)[0],
-                            vmax=visualization.ZScaleInterval().get_limits(psf2)[1])
+                    ax2t.imshow(psf2, origin='lower',cmap='gray',
+                                vmin=visualization.ZScaleInterval().get_limits(psf2)[0],
+                                vmax=visualization.ZScaleInterval().get_limits(psf2)[1])
 
-                ax2t.get_yaxis().set_visible(False)
-                ax2t.get_xaxis().set_visible(False)
+                    ax2t.get_yaxis().set_visible(False)
+                    ax2t.get_xaxis().set_visible(False)
 
-                ax2t.set_title('PSF')
+                    ax2t.set_title('PSF')
 
-                plt.draw()
+                    plt.draw()
 
-                
+                    
 
-                ax3t = plt.subplot2grid((2,5),(0,4),projection='3d')
+                    ax3t = plt.subplot2grid((2,5),(0,4),projection='3d')
 
-                tmpArr2 = range(len(psf2))
+                    tmpArr2 = range(len(psf2))
 
-                X2, Y2 = np.meshgrid(tmpArr2,tmpArr2)
+                    X2, Y2 = np.meshgrid(tmpArr2,tmpArr2)
 
-                ax3t.plot_surface(X2,Y2,psf2,rstride=1,cstride=1,cmap='viridis_r',alpha=0.5)
+                    ax3t.plot_surface(X2,Y2,psf2,rstride=1,cstride=1,cmap='viridis_r',alpha=0.5)
 
-                ax3t.set_zlim(np.min(psf2),np.max(psf2)*1.1)
+                    ax3t.set_zlim(np.min(psf2),np.max(psf2)*1.1)
 
-                ax3t.set_axis_off()
+                    ax3t.set_axis_off()
 
-                plt.draw()
+                    plt.draw()
 
-                plt.tight_layout(pad=0.5)
+                    plt.tight_layout(pad=0.5)
+                    
+                    empirical = True
+
+ 
+                except:
+                    print('PSF fit failed (usually a weird EPSF_builder error):\nTrying different stamp size usually fixes!')
+                    empirical = False
 
 
                 if not quiet:
-                    happy = input('\nProceed with this template PSF? [y] ')
+                    if empirical == True:
+                        happy = input('\nProceed with this template PSF? [y] ')
+                        if not happy: happy = 'y'
+                    else:
+                        happy = input('\nProceed with simple Gaussian (y) or try varying parameters (n)? [n] ')
                     if not happy: happy = 'y'
                     if happy != 'y':
                         stamprad1 = input('Try new cutout radius: [' +str(stamprad2)+']')
@@ -1321,6 +1417,23 @@ for f in usedfilters:
                         samp2 = int(samp1)
                 else:
                     happy = 'y'
+                    
+            
+            if empirical == False:
+                print('\nNo PSF determined, using basic Gaussian model')
+                
+                sigma_gauss2 = input('Please specify width (sigma) in pixels ['+str(sigma_gauss_0)+'] ')
+                if not sigma_gauss2: sigma_gauss2 = sigma_gauss_0
+                sigma_gauss2 = float(sigma_gauss2)
+                
+                epsf2 = IntegratedGaussianPRF(sigma=sigma_gauss2)
+                
+                psf2 = np.zeros((2*stamprad2+1,2*stamprad2+1))
+                
+                for xt in np.arange(2*stamprad2+1):
+                    for yt in np.arange(2*stamprad2+1):
+                        psf2[xt,yt] = epsf2.evaluate(xt,yt,x_0=stamprad2,y_0=stamprad2,sigma=sigma_gauss2,flux=1)
+
 
 
             tmppsf = fits.PrimaryHDU(psf2)
@@ -1500,7 +1613,8 @@ for f in usedfilters:
 
 
         # apertures
-        photap = photutils.CircularAperture(SNco, r=aprad_opt)
+#        photap = photutils.CircularAperture(SNco, r=aprad_opt)
+        photap = [photutils.CircularAperture(SNco, r=r) for r in [aprad_opt,aprad]]
         skyap = photutils.CircularAnnulus(SNco, r_in=aprad, r_out=aprad+skyrad)
         skymask = skyap.to_mask(method='center')
 
@@ -1512,7 +1626,8 @@ for f in usedfilters:
         err_array = calc_total_error(data, bkg_error, gain)
         SNphotTab = photutils.aperture_photometry(data, photap, err_array)
         SNphotTab['local_sky'] = bkg_local
-        SNphotTab['aperture_sum_sub'] = SNphotTab['aperture_sum'] - bkg_local * photap.area
+        SNphotTab['aperture_sum_sub'] = SNphotTab['aperture_sum_1'] - bkg_local * photap[1].area
+        SNphotTab['aperture_opt_sum_sub'] = SNphotTab['aperture_sum_0'] - bkg_local * photap[0].area
 
         print('Aperture done')
 
@@ -1572,11 +1687,15 @@ for f in usedfilters:
 
         print('Converting flux to magnitudes...')
 
-        SNap = -2.5*np.log10(SNphotTab['aperture_sum_sub']) + ap_corr
+        SNap = -2.5*np.log10(SNphotTab['aperture_sum_sub'])
         # aperture mag error assuming Poisson noise
-        errSNap = 0.92*abs(SNphotTab['aperture_sum_err'] / SNphotTab['aperture_sum_sub'])
-        
-        ulim = -2.5*np.log10(3*SNphotTab['aperture_sum_err']) + ap_corr
+        errSNap = 0.92*abs(SNphotTab['aperture_sum_err_1'] / SNphotTab['aperture_sum_sub'])
+
+        SNap_opt = -2.5*np.log10(SNphotTab['aperture_opt_sum_sub']) + ap_corr
+        # aperture mag error assuming Poisson noise
+        errSNap_opt = np.sqrt((0.92*abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub']))**2 + (0.1*ap_corr)**2)
+
+        ulim = -2.5*np.log10(3*SNphotTab['aperture_sum_err_1'])
 
         try:
             SNpsf = -2.5*np.log10(SNpsfphotTab['flux_fit'])
@@ -1597,7 +1716,13 @@ for f in usedfilters:
 
             calMagAp = SNap + ZP
 
-            errMagAp = np.sqrt(errSNap**2 + errZP**2 + (0.1*ap_corr)**2)
+            errMagAp = np.sqrt(errSNap**2 + errZP**2)
+            
+            
+            calMagAp_opt = SNap_opt + ZP
+
+            errMagAp_opt = np.sqrt(errSNap_opt**2 + errZP**2)
+
             
             calMagLim = ulim + ZP
 
@@ -1611,13 +1736,20 @@ for f in usedfilters:
 
             errMagAp = errSNap
             
+            
+            calMagAp_opt = SNap_opt
+
+            errMagAp_opt = errSNap_opt
+
+            
             calMagLim = ulim
 
             comment1 = 'instrumental mag only'
 
 
         print('> PSF mag = '+'%.2f +/- %.2f' %(calMagPsf,errMagPsf))
-        print('> Aperture mag = '+'%.2f +/- %.2f' %(calMagAp,errMagAp))
+        print('> Aperture mag (default aperture) = '+'%.2f +/- %.2f' %(calMagAp,errMagAp))
+        print('> Aperture mag (optimised aperture) = '+'%.2f +/- %.2f' %(calMagAp_opt,errMagAp_opt))
         print('> Limiting mag = '+'%.2f (3 sigma)' %(calMagLim))
 
         comment = ''
@@ -1627,8 +1759,7 @@ for f in usedfilters:
         if comment1:
             comment += (' // '+comment1)
 
-        outFile.write('\n'+image+'\t'+f+'\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s'
-                        %(mjd,calMagPsf,errMagPsf,calMagAp,errMagAp,calMagLim,ZP,errZP,template,comment))
+        outFile.write('\n'+image+'\t'+f+ '\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(mjd,calMagPsf,errMagPsf,calMagAp,errMagAp,calMagAp_opt, errMagAp_opt,calMagLim,ZP,errZP,template,comment))
 #        outFile.write(comment)
 
 
