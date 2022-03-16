@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-version = '1.1'
+version = '1.2'
 
 '''
     PSF: PHOTOMETRY SANS FRUSTRATION
@@ -204,32 +204,22 @@ if len(ims) == 0:
 
 def PS1catalog(ra,dec,magmin=25,magmax=8):
 
-    queryurl = 'https://archive.stsci.edu/panstarrs/search.php?'
-    queryurl += 'RA='+str(ra)
-    queryurl += '&DEC='+str(dec)
-    queryurl += '&SR=0.083&selectedColumnsCsv=ndetections,raMean,decMean,'
-    queryurl += 'gMeanPSFMag,rMeanPSFMag,iMeanPSFMag,zMeanPSFMag,yMeanPSFMag,iMeanKronMag'
-    queryurl += '&ordercolumn1=ndetections&descending1=on&max_records=200'
+    queryurl = 'https://catalogs.mast.stsci.edu/api/v0.1/panstarrs/dr2/stack?'
+    queryurl += 'ra='+str(ra)
+    queryurl += '&dec='+str(dec)
+    queryurl += '&radius=0.083'
+    queryurl += '&columns=[raStack,decStack,gPSFMag,rPSFMag,iPSFMag,zPSFMag,yPSFMag,iKronMag]'
+    queryurl += '&nDetections.gte=6&pagesize=10000'
 
     print('\nQuerying PS1 for reference stars via MAST...\n')
 
     query = requests.get(queryurl)
 
-    results = query.text
+    results = query.json()
 
-    entries = results.split('DATA')[2][11:][:-19].split('</TD>\n</TR>\n<TR>\n<TD>')
-
-    data = []
-
-    for i in entries:
-        data.append(np.array(i.split('</TD><TD>')).T)
-
-    if len(data) > 1:
-
-        data = np.array(data).astype(float)
-
-        # Get rid of n_det column
-        data = data[:,1:][data[:,0]>3]
+    if len(results['data']) > 1:
+    
+        data = np.array(results['data'])
 
 #        # Get rid of non-detections:
 #        data = data[data[:,2]>-999]
@@ -254,9 +244,29 @@ def PS1catalog(ra,dec,magmin=25,magmax=8):
 
 
         # Star-galaxy separation
-        data = data[:,:-1][data[:,4]-data[:,-1]<0.05]
+        data = data[:,:-1][data[:,4]-data[:,-1]<0.1]
+        
+        catalog = coords.SkyCoord(ra=data[:,0]*u.degree, dec=data[:,1]*u.degree)
+        
+        data2 = []
+        
+        indices = np.arange(len(data))
+        
+        used = []
+        
+        for i in data:
+            source = coords.SkyCoord(ra=i[0]*u.degree, dec=i[1]*u.deg)
+            d2d = source.separation(catalog)
+            catalogmsk = d2d < 2.5*u.arcsec
+            indexmatch = indices[catalogmsk]
+            for j in indexmatch:
+                if j not in used:
+                    data2.append(data[j])
+                    for k in indexmatch:
+                        used.append(k)
 
-        np.savetxt('PS1_seq.txt',data,fmt='%.8f\t%.8f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f', header='ra\tdec\tg\tr\ti\tz\ty',comments='')
+
+        np.savetxt('PS1_seq.txt',data2,fmt='%.8f\t%.8f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f', header='ra\tdec\tg\tr\ti\tz\ty',comments='')
 
         print('Success! Sequence star file created: PS1_seq.txt')
 
@@ -413,12 +423,12 @@ print('#################################################\n#                     
 
 
 # A place to save output files
-outdir = 'PSF_output_'+str(int(time.time()))
+outdir = 'PSF_output'
 
 if not os.path.exists(outdir): os.makedirs(outdir)
 
 # A file to write final magnitudes
-results_filename = os.path.join(outdir,'PSF_phot.txt')
+results_filename = os.path.join(outdir,'PSF_phot_'+str(int(time.time()))+'.txt')
 outFile = open(results_filename,'w')
 outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tAPmag_opt\terr\tLimit\tZP\terr\ttemplate\tcomments')
 
@@ -510,12 +520,16 @@ for image in ims:
             mjd = fits.getval(image,'MJD-OBS')
         except:
             try:
-                jd = fits.getval(image,'JD')
-                mjd = jd - 2400000
+                mjd = fits.getval(image,'OBSMJD')
             except:
-                mjd = 99999
+                try:
+                    jd = fits.getval(image,'JD')
+                    mjd = jd - 2400000.5
+                except:
+                    mjd = input('No MJD found, please enter: [99999] ')
+                    if not mjd: mjd = 99999
 
-        mjd = float(mjd)
+    mjd = float(mjd)
 
     template = ''
 
@@ -655,46 +669,46 @@ for f in usedfilters:
                     if not dostack: dostack = 'n'
                 else:
                     dostack = 'n'
-                ims1 = ['stack_'+f+'.fits']
-                
-    if dostack in ('y','yes'):
-        print('\nAligning and stacking images...')
-        
-        mjdstack = np.mean(filtertab[:,2][filtertab[:,1]==f].astype(float))
 
-        zero_shift_image = ims1[0]
-        
-        imshifts = {} # dictionary to hold the x and y shift pairs for each image
-        for im1 in ims1:
-            ## phase_cross_correlation is a function that calculates shifts by comparing 2-D arrays
-            imshift, imshifterr, diffphase = phase_cross_correlation(
-                fits.getdata(zero_shift_image),
-                fits.getdata(im1))
-            imshifts[im1] = imshift
+        if dostack in ('y','yes'):
+            print('\nAligning and stacking images...')
+            
+            mjdstack = np.mean(filtertab[:,2][filtertab[:,1]==f].astype(float))
 
-        ## new dictionary for shifted image data:
-        shifted_data = {}
-        for im1 in imshifts:
-            shifted_data[im1] = interp.shift(
-                fits.getdata(im1),
-                imshifts[im1])
-            shifted_data[im1][shifted_data[im1] == 0] = 'nan'
+            zero_shift_image = ims1[0]
+            
+            imshifts = {} # dictionary to hold the x and y shift pairs for each image
+            for im1 in ims1:
+                ## phase_cross_correlation is a function that calculates shifts by comparing 2-D arrays
+                imshift, imshifterr, diffphase = phase_cross_correlation(
+                    fits.getdata(zero_shift_image),
+                    fits.getdata(im1))
+                imshifts[im1] = imshift
 
-        shifted_data_cube = np.stack([shifted_data[im1] for im1 in ims1])
-        stacked_data = np.nanmedian(shifted_data_cube, axis=0)
-        
-        stackheader = fits.getheader(zero_shift_image)
-        
-        stackheader['MJD'] = mjdstack
-        stackheader['MJD-OBS'] = mjdstack
+            ## new dictionary for shifted image data:
+            shifted_data = {}
+            for im1 in imshifts:
+                shifted_data[im1] = interp.shift(
+                    fits.getdata(im1),
+                    imshifts[im1])
+                shifted_data[im1][shifted_data[im1] == 0] = 'nan'
 
-        fits.writeto('stack_'+f+'.fits',
-                stacked_data,header=stackheader,
-                overwrite=True)
+            shifted_data_cube = np.stack([shifted_data[im1] for im1 in ims1])
+            stacked_data = np.nanmedian(shifted_data_cube, axis=0)
+            
+            stackheader = fits.getheader(zero_shift_image)
+            
+            stackheader['MJD'] = mjdstack
+            stackheader['MJD-OBS'] = mjdstack
 
-        print('Done')
+            fits.writeto('stack_'+f+'.fits',
+                    stacked_data,header=stackheader,
+                    overwrite=True)
+
+            print('Done')
 
         ims2 = ['stack_'+f+'.fits']
+
     else:
         ims2 = ims1.copy()
 
@@ -722,6 +736,8 @@ for f in usedfilters:
             mjd = fits.getval(filename='stack_'+f+'.fits',keyword='MJD')
         else:
             mjd = filtertab[:,2][filtertab[:,0]==image][0]
+
+        mjd = float(mjd)
 
         comment1 = ''
 
@@ -864,7 +880,7 @@ for f in usedfilters:
         sig_x = np.nanstd(co[:,0]-orig_co[:,0])
         sig_y = np.nanstd(co[:,1]-orig_co[:,1])
 
-        found = (abs(co[:,0]-orig_co[:,0])<abs(del_x)*10)&(abs(co[:,1]-orig_co[:,1])<abs(del_y)*10)
+        found = (abs(co[:,0]-orig_co[:,0])<max(abs(del_x)*10,5))&(abs(co[:,1]-orig_co[:,1])<max(abs(del_y)*10,5))
 
         co = co[found]
 
@@ -952,10 +968,14 @@ for f in usedfilters:
                 
                 aprad_opt = np.sqrt(len(psf[psf>np.max(psf)*pix_frac])/np.pi)
                 
-                ap_frac = np.sum(psf[psf>np.max(psf)*pix_frac])/np.sum(psf) # fraction of flux contained in aprad_opt
+                test_ap = photutils.CircularAperture([len(psf[0])/2,len(psf[0])/2], r=aprad_opt)
+                                
+                testTab = photutils.aperture_photometry(psf,test_ap)
+                
+                ap_frac = testTab['aperture_sum'][0]/np.sum(psf) # fraction of flux contained in aprad_opt
 
                 ap_corr = 2.5*np.log10(ap_frac)
-
+                
 
                 ax2 = plt.subplot2grid((2,5),(0,3))
 
@@ -1040,7 +1060,11 @@ for f in usedfilters:
             
             aprad_opt = np.sqrt(len(psf[psf>np.max(psf)*pix_frac])/np.pi)
             
-            ap_frac = np.sum(psf[psf>np.max(psf)*pix_frac])/np.sum(psf) # fraction of flux contained in aprad_opt
+            test_ap = photutils.CircularAperture([len(psf[0])/2,len(psf[0])/2], r=aprad_opt)
+            
+            testTab = photutils.aperture_photometry(psf,test_ap)
+            
+            ap_frac = testTab['aperture_sum'][0]/np.sum(psf) # fraction of flux contained in aprad_opt
 
             ap_corr = 2.5*np.log10(ap_frac)
 
@@ -1106,12 +1130,14 @@ for f in usedfilters:
                     vmin=visualization.ZScaleInterval().get_limits(data)[0],
                     vmax=visualization.ZScaleInterval().get_limits(data)[1])
 
-        goodStars = (photTab['aperture_sum']>5*photTab['aperture_sum_err'])&(psfphotTab['flux_fit']/psfphotTab['flux_0']>0.5)&(psfphotTab['flux_fit']/psfphotTab['flux_0']<1.5)
+        goodStars = (photTab['aperture_sum']>3.5*photTab['aperture_sum_err'])
 
         ax1.errorbar(co[:,0][~goodStars],co[:,1][~goodStars],fmt='x',mfc='none',
                     markeredgewidth=2, color='C1',
-                    markersize=8,label='Too faint or PSF/ap differ')
-                    
+                    markersize=8,label='Too faint')
+
+        goodStars = np.ones(len(photTab)).astype(bool)
+
         ax1.legend(frameon=True,fontsize=16)
 
 #        ax1.text(len(data[:,0])*0.8,len(data[:,1])*0.9,'Rejected',color='C1')
@@ -1147,7 +1173,10 @@ for f in usedfilters:
                 print('\nInitial zeropoint =  %.2f +/- %.2f\n' %(zp1,errzp1))
                 print('Checking for bad stars...')
 
-                checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < errzp1*sigClip
+                if len(seqIm) > 10:
+                    checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < errzp1*sigClip
+                else:
+                    checkMags = np.ones(len(seqIm)).astype(bool)
 
 #                if False in checkMags:
 #                    print('Rejecting stars from ZP: ')
@@ -1772,7 +1801,7 @@ for f in usedfilters:
         if comment1:
             comment += (' // '+comment1)
 
-        outFile.write('\n'+image+'\t'+f+ '\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(mjd,calMagPsf,errMagPsf,calMagAp,errMagAp,calMagAp_opt, errMagAp_opt,calMagLim,ZP,errZP,template,comment))
+        outFile.write('\n'+image+'\t'+f+ '\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(mjd,calMagPsf,errMagPsf,calMagAp,errMagAp,calMagAp_opt, errMagAp_opt,calMagLim,ZP,errZP,template,comment))
 #        outFile.write(comment)
 
 
