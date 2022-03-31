@@ -81,7 +81,7 @@ import astropy.units as u
 from astropy.io import fits
 from astropy.nddata import Cutout2D
 import astroalign as aa
-#from reproject import reproject_interp
+from reproject import reproject_interp
 from PyZOGY.subtract import run_subtraction
 from photutils.utils import calc_total_error
 from photutils.psf import IntegratedGaussianPRF
@@ -154,6 +154,8 @@ parser.add_argument('--tmpl-sat', dest='tmpl_sat', default=40000, type=int,
 parser.add_argument('--keep', dest='keep', default=False, action='store_true',
                     help='Keep intermediate products')
 
+parser.add_argument('--force', dest='forcepos', default=False, action='store_true',
+                    help='Do not recenter on transient')
 
 args = parser.parse_args()
 
@@ -175,6 +177,7 @@ cutoutsize = args.cut
 tmpl_sat = args.tmpl_sat
 sci_sat = args.sci_sat
 keep = args.keep
+forcepos = args.forcepos
 
 ims = [i for i in args.file_to_reduce]
 
@@ -1176,7 +1179,8 @@ for f in usedfilters:
                 if len(seqIm) > 10:
                     checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < errzp1*sigClip
                 else:
-                    checkMags = np.ones(len(seqIm)).astype(bool)
+#                    checkMags = np.ones(len(seqIm)).astype(bool)
+                    checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < 0.5
 
 #                if False in checkMags:
 #                    print('Rejecting stars from ZP: ')
@@ -1262,33 +1266,38 @@ for f in usedfilters:
                 tmp = tmp[1]
 
 
-            ### Using Reproject
-
-#            tmp_resampled, footprint = reproject_interp(tmp, header)
-#
-#            tmp_resampled[np.isnan(tmp_resampled)] = np.nanmedian(tmp_resampled)
-#
-#            hdu2 = fits.PrimaryHDU(tmp_resampled)
-#
-#            hdu2.writeto('tmpl_aligned.fits',overwrite=True)
-
 
 
             ### Using Astroalign
 
-            im_fixed = np.array(data, dtype="<f4")
-            tmp_fixed = np.array(data2, dtype="<f4")
+            try:
+                im_fixed = np.array(data, dtype="<f4")
+                tmp_fixed = np.array(data2, dtype="<f4")
+
+                registered, footprint = aa.register(tmp_fixed, im_fixed)
+
+                tmp_masked = np.ma.masked_array(registered, footprint, fill_value=np.nanmedian(tmp_fixed)).filled()
+
+                tmp_masked[np.isnan(tmp_masked)] = np.nanmedian(tmp_fixed)
+
+                hdu2 = fits.PrimaryHDU(tmp_masked)
+
+                hdu2.writeto('tmpl_aligned.fits',overwrite=True)
     
-            registered, footprint = aa.register(tmp_fixed, im_fixed)
-    
-            tmp_masked = np.ma.masked_array(registered, footprint, fill_value=np.nanmedian(tmp_fixed)).filled()
-    
-            tmp_masked[np.isnan(tmp_masked)] = np.nanmedian(tmp_fixed)
-    
-            hdu2 = fits.PrimaryHDU(tmp_masked)
-    
-            hdu2.writeto('tmpl_aligned.fits',overwrite=True)
+            except:
             
+                print('Astroalign failed to match images, trying Reproject')
+            
+            ### Using Reproject
+
+                tmp_resampled, footprint = reproject_interp(tmp, header)
+
+                tmp_resampled[np.isnan(tmp_resampled)] = np.nanmedian(tmp_resampled)
+
+                hdu2 = fits.PrimaryHDU(tmp_resampled)
+
+                hdu2.writeto('tmpl_aligned.fits',overwrite=True)
+
 
 
             fig2 = plt.figure(2,(14,7))
@@ -1619,9 +1628,9 @@ for f in usedfilters:
         SNco[0] += del_x
         SNco[1] += del_y
 
-        # SNco[0],SNco[1] = photutils.centroids.centroid_sources(data,SNco[0],SNco[1],
-        #                             centroid_func=photutils.centroids.centroid_2dg)
-#        SNco = [np.array([SNco[0]]),np.array([SNco[1]])]
+        if not forcepos:
+            SNco[0],SNco[1] = photutils.centroids.centroid_sources(data,SNco[0],SNco[1],
+                                         centroid_func=photutils.centroids.centroid_2dg)
 
         plt.figure(1)
 
