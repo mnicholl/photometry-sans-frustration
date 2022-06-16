@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-version = '1.2'
+version = '1.3'
 
 '''
     PSF: PHOTOMETRY SANS FRUSTRATION
@@ -112,13 +112,16 @@ parser.add_argument('--shifts', dest='shifts', default=False, action='store_true
 parser.add_argument('--aprad', dest='aprad', default=15, type=int,
                     help='Radius for aperture photometry')
 
+parser.add_argument('--apfrac', dest='apfrac', default=0.9, type=float,
+                    help='Fraction of PSF flux to include in optimal aperture')
+
 parser.add_argument('--stamprad', dest='stamprad', default=15, type=int,
                     help='Radius for PSF extraction')
                     
 parser.add_argument('--skyrad', dest='skyrad', default=5, type=int,
                     help='Width of annulus for sky background')
 
-parser.add_argument('--box', dest='bkgbox', default=100, type=int,
+parser.add_argument('--box', dest='bkgbox', default=200, type=int,
                     help='Size of stamps for background fit')
 
 parser.add_argument('--psfthresh', dest='psfthresh', default=20., type=float,
@@ -166,6 +169,7 @@ magmin = args.magmin
 magmax = args.magmax
 shifts = args.shifts
 aprad = args.aprad
+apfrac = args.apfrac
 stamprad0 = args.stamprad
 skyrad = args.skyrad
 bkgbox = args.bkgbox
@@ -250,9 +254,11 @@ def PS1catalog(ra,dec,magmin=25,magmax=8):
 #        data = data[data[:,6]>magmax]
 
 
-        # Star-galaxy separation
+        # Star-galaxy separation: star if PSFmag - KronMag < 0.1
         data = data[:,:-1][data[:,4]-data[:,-1]<0.1]
         
+
+        # Below is a bit of a hack to remove duplicates
         catalog = coords.SkyCoord(ra=data[:,0]*u.degree, dec=data[:,1]*u.degree)
         
         data2 = []
@@ -437,7 +443,7 @@ if not os.path.exists(outdir): os.makedirs(outdir)
 # A file to write final magnitudes
 results_filename = os.path.join(outdir,'PSF_phot_'+str(int(time.time()))+'.txt')
 outFile = open(results_filename,'w')
-outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag\terr\tAPmag_opt\terr\tLimit\tZP\terr\ttemplate\tcomments')
+outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag_opt\terr\tAPmag_big\terr\tLimit\tZP\terr\ttemplate\tcomments')
 
 
 
@@ -980,17 +986,19 @@ for f in usedfilters:
                 # determine aperture size and correction
                 
     #            pix_frac = 0.5 # Optimal radius for S/N is R ~ FWHM. But leads to large aperture correction
-                pix_frac = 0.1 # Aperture containing pixels within 90% of peak flux. Typically gives a radius ~ 2*FWHM
-                
+    #            pix_frac = 0.1 # Aperture containing 90% of flux. Typically gives a radius ~ 2*FWHM
+
+                pix_frac = np.max([1-apfrac,0.05])
+
                 aprad_opt = np.sqrt(len(psf[psf>np.max(psf)*pix_frac])/np.pi)
                 
                 test_ap = photutils.CircularAperture([len(psf[0])/2,len(psf[0])/2], r=aprad_opt)
                                 
                 testTab = photutils.aperture_photometry(psf,test_ap)
                 
-                ap_frac = testTab['aperture_sum'][0]/np.sum(psf) # fraction of flux contained in aprad_opt
+                apfrac_verify = testTab['aperture_sum'][0]/np.sum(psf) # fraction of flux contained in aprad_opt
 
-                ap_corr = 2.5*np.log10(ap_frac)
+                ap_corr = 2.5*np.log10(apfrac_verify)
                 
 
                 ax2 = plt.subplot2grid((2,5),(0,3))
@@ -1072,17 +1080,19 @@ for f in usedfilters:
             # determine aperture size and correction
             
 #            pix_frac = 0.5 # Optimal radius for S/N is R ~ FWHM. But leads to large aperture correction
-            pix_frac = 0.1 # Aperture containing 90% of flux. Typically gives a radius ~ 2*FWHM
-            
+#            pix_frac = 0.1 # Aperture containing 90% of flux. Typically gives a radius ~ 2*FWHM
+
+            pix_frac = np.max([1-apfrac,0.05])
+
             aprad_opt = np.sqrt(len(psf[psf>np.max(psf)*pix_frac])/np.pi)
             
             test_ap = photutils.CircularAperture([len(psf[0])/2,len(psf[0])/2], r=aprad_opt)
             
             testTab = photutils.aperture_photometry(psf,test_ap)
             
-            ap_frac = testTab['aperture_sum'][0]/np.sum(psf) # fraction of flux contained in aprad_opt
+            apfrac_verify = testTab['aperture_sum'][0]/np.sum(psf) # fraction of flux contained in aprad_opt
 
-            ap_corr = 2.5*np.log10(ap_frac)
+            ap_corr = 2.5*np.log10(apfrac_verify)
 
 
             ax2 = plt.subplot2grid((2,5),(0,3))
@@ -1119,6 +1129,17 @@ for f in usedfilters:
                 
         scipsf = fits.PrimaryHDU(psf)
         scipsf.writeto('sci_psf.fits',overwrite=True)
+
+
+        print('\nDoing aperture photometry for optimal aperture...')
+
+        photaps_opt = photutils.CircularAperture(co, r=aprad_opt)
+
+        photTab_opt = photutils.aperture_photometry(data, photaps_opt, error=err_array)
+
+        print('Done')
+
+
 
         print('\nStarting PSF photometry...')
 
@@ -1178,6 +1199,11 @@ for f in usedfilters:
                     flux = np.array(psfphotTab['flux_fit'])[goodStars]
                 else:
                     flux = np.array(photTab['aperture_sum'])[goodStars]
+                    
+                
+                # PSF zeropoint
+                flux = np.array(psfphotTab['flux_fit'])[goodStars]
+                
                 seqIm = -2.5*np.log10(flux)
 
                 zpList1 = seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2] - seqIm[mag_range_2]
@@ -1214,8 +1240,11 @@ for f in usedfilters:
                 zpList = seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags] - seqIm[mag_range_2][checkMags]
 
                 ZP = np.median(zpList)
-                errZP = np.std(zpList)/np.sqrt(len(zpList))
-                
+                errZP = np.std(zpList)#/np.sqrt(len(zpList))
+
+                ZP_psf = np.median(zpList)
+                errZP_psf = np.std(zpList)#/np.sqrt(len(zpList))
+
                 axZP.scatter(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags], zpList,color='k')
 
                 axZP.axhline(ZP,linestyle='-',color='C0')
@@ -1229,8 +1258,68 @@ for f in usedfilters:
                 axZP.set_xlim(magmax2,magmin2)
                 
                 plt.draw()
+ 
+                # optimal aperture ZP
+                flux = np.array(photTab_opt['aperture_sum'])[goodStars]
+                
+                seqIm = -2.5*np.log10(flux)
 
-                print('\nFinal Zeropoint = %.2f +/- %.2f' %(ZP,errZP))
+                zpList1 = seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2] - seqIm[mag_range_2]
+
+                zp1 = np.nanmedian(zpList1)
+                errzp1 = np.nanstd(zpList1)
+
+                if len(seqIm) > 10:
+                    checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < errzp1*sigClip
+                else:
+    #                    checkMags = np.ones(len(seqIm)).astype(bool)
+                    checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < 0.5
+
+    #                if False in checkMags:
+    #                    print('Rejecting stars from ZP: ')
+    #                    print(psfphotTab['id'][goodStars][mag_range_2][~checkMags])
+    #                    print('Bad ZPs:')
+    #                    print( seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][~checkMags] - seqIm[mag_range_2][~checkMags])
+
+
+                zpList = seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags] - seqIm[mag_range_2][checkMags]
+
+                ZP_opt = np.median(zpList)
+                errZP_opt = np.std(zpList)#/np.sqrt(len(zpList))
+
+
+                # big aperture ZP
+                flux = np.array(photTab['aperture_sum'])[goodStars]
+                
+                seqIm = -2.5*np.log10(flux)
+
+                zpList1 = seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2] - seqIm[mag_range_2]
+
+                zp1 = np.nanmedian(zpList1)
+                errzp1 = np.nanstd(zpList1)
+
+                if len(seqIm) > 10:
+                    checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < errzp1*sigClip
+                else:
+    #                    checkMags = np.ones(len(seqIm)).astype(bool)
+                    checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < 0.5
+
+    #                if False in checkMags:
+    #                    print('Rejecting stars from ZP: ')
+    #                    print(psfphotTab['id'][goodStars][mag_range_2][~checkMags])
+    #                    print('Bad ZPs:')
+    #                    print( seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][~checkMags] - seqIm[mag_range_2][~checkMags])
+
+
+                zpList = seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags] - seqIm[mag_range_2][checkMags]
+
+                ZP_ap = np.median(zpList)
+                errZP_ap = np.std(zpList)#/np.sqrt(len(zpList))
+
+
+                print('\nPSF Zeropoint = %.2f +/- %.2f' %(ZP_psf,errZP_psf))
+                print('Big aperture Zeropoint = %.2f +/- %.2f' %(ZP_ap,errZP_ap))
+                print('Optimal aperture Zeropoint = %.2f +/- %.2f' %(ZP_opt,errZP_opt))
 
                 
                 if not quiet:
@@ -1251,6 +1340,12 @@ for f in usedfilters:
         else:
             ZP = np.nan
             errZP = np.nan
+            ZP_psf = np.nan
+            errZP_psf = np.nan
+            ZP_opt = np.nan
+            errZP_opt = np.nan
+            ZP_ap = np.nan
+            errZP_ap = np.nan
 
             print('\nCould not determine ZP (no sequence star mags in filter?) : instrumental mag only!!!')
 
@@ -1789,11 +1884,13 @@ for f in usedfilters:
         # aperture mag error assuming Poisson noise
         errSNap = 0.92*abs(SNphotTab['aperture_sum_err_1'] / SNphotTab['aperture_sum_sub'])
 
-        SNap_opt = -2.5*np.log10(SNphotTab['aperture_opt_sum_sub']) + ap_corr
+        SNap_opt = -2.5*np.log10(SNphotTab['aperture_opt_sum_sub'])
+        SNap_opt_corr = -2.5*np.log10(SNphotTab['aperture_opt_sum_sub']) + ap_corr
         # aperture mag error assuming Poisson noise
-        errSNap_opt = np.sqrt((0.92*abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub']))**2 + (0.1*ap_corr)**2)
+        errSNap_opt = 0.92*abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub'])
+        errSNap_opt_corr = np.sqrt((0.92*abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub']))**2 + (0.1*ap_corr)**2)
 
-        ulim = -2.5*np.log10(3*SNphotTab['aperture_sum_err_1'])
+        ulim = -2.5*np.log10(3*np.sqrt(sigsky) * photap[0].area)
 
         try:
             SNpsf = -2.5*np.log10(SNpsfphotTab['flux_fit'])
@@ -1807,22 +1904,22 @@ for f in usedfilters:
 
         if f in seqMags:
 
-            calMagPsf = SNpsf + ZP
+            calMagPsf = SNpsf + ZP_psf
 
-            errMagPsf = np.sqrt(errSNpsf**2 + errZP**2)
+            errMagPsf = np.sqrt(errSNpsf**2 + errZP_psf**2)
 
 
-            calMagAp = SNap + ZP
+            calMagAp = SNap + ZP_ap
 
-            errMagAp = np.sqrt(errSNap**2 + errZP**2)
+            errMagAp = np.sqrt(errSNap**2 + errZP_ap**2)
             
             
-            calMagAp_opt = SNap_opt + ZP
+            calMagAp_opt = SNap_opt + ZP_opt
 
-            errMagAp_opt = np.sqrt(errSNap_opt**2 + errZP**2)
+            errMagAp_opt = np.sqrt(errSNap_opt**2 + errZP_opt**2)
 
             
-            calMagLim = ulim + ZP
+            calMagLim = ulim + ZP_opt
 
         else:
             calMagPsf = SNpsf
@@ -1846,9 +1943,9 @@ for f in usedfilters:
 
 
         print('> PSF mag = '+'%.2f +/- %.2f' %(calMagPsf,errMagPsf))
-        print('> Aperture mag (default aperture) = '+'%.2f +/- %.2f' %(calMagAp,errMagAp))
         print('> Aperture mag (optimised aperture) = '+'%.2f +/- %.2f' %(calMagAp_opt,errMagAp_opt))
-        print('> Limiting mag = '+'%.2f (3 sigma)' %(calMagLim))
+        print('> Aperture mag (big aperture) = '+'%.2f +/- %.2f' %(calMagAp,errMagAp))
+        print('> Limiting mag (3 sigma, optimum ap) = '+'%.2f' %(calMagLim))
 
         comment = ''
         if not quiet:
@@ -1857,7 +1954,7 @@ for f in usedfilters:
         if comment1:
             comment += (' // '+comment1)
 
-        outFile.write('\n'+image+'\t'+f+ '\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(mjd,calMagPsf,errMagPsf,calMagAp,errMagAp,calMagAp_opt, errMagAp_opt,calMagLim,ZP,errZP,template,comment))
+        outFile.write('\n'+image+'\t'+f+ '\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP,errZP,template,comment))
 #        outFile.write(comment)
 
 
