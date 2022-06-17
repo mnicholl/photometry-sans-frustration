@@ -1682,7 +1682,15 @@ for f in usedfilters:
                     'tmpl_psf.fits',normalization='science',n_stamps=4,science_saturation=sci_sat_new, reference_saturation=tmpl_sat_new)
                                         
                 except:
-                    print('Subtraction failed')
+                    print('Subtraction failed - can vary parameters or proceed without subtraction')
+                    
+                    try_again = input('\nTry varying parameters? (y/n) [y] ')
+                    if not try_again: try_again = 'y'
+
+                    if try_again not in ('y','yes'):
+                        print('\nUsing unsubtracted data')
+                        template = ''
+                        break
     
                     cutoutsize1 = input('Try larger cutout size? ['+str(cutoutsize_new)+']')
                     if not cutoutsize1: cutoutsize1 = cutoutsize_new
@@ -1704,25 +1712,25 @@ for f in usedfilters:
                 im_sci.data = im_sub
                 im_sci.writeto('sub.fits', overwrite=True)
             
-                data = im_sub
+                data_sub = im_sub
                 
                 try:
-                    bkg_new = photutils.background.Background2D(data,box_size=bkgbox)
+                    bkg_new = photutils.background.Background2D(data_sub,box_size=bkgbox)
                 except:
-                    bkg_new = photutils.background.Background2D(data,box_size=int(cutoutsize_new/4),exclude_percentile=0)
+                    bkg_new = photutils.background.Background2D(data_sub,box_size=int(cutoutsize_new/4),exclude_percentile=0)
 
                 
-                bkg_error = bkg_new.background_rms
+                bkg_new_error = bkg_new.background_rms
                 
-                data -= bkg_new.background
+                data_sub -= bkg_new.background
 
                 plt.figure(1)
 
                 ax1.clear()
                 
-                ax1.imshow(data, origin='lower',cmap='gray',
-                            vmin=visualization.ZScaleInterval().get_limits(data)[0],
-                            vmax=visualization.ZScaleInterval().get_limits(data)[1])
+                ax1.imshow(data_sub, origin='lower',cmap='gray',
+                            vmin=visualization.ZScaleInterval().get_limits(data_sub)[0],
+                            vmax=visualization.ZScaleInterval().get_limits(data_sub)[1])
                             
                 ax1.errorbar(co[:,0]-(SNco[0]-cutoutsize_new/2.),co[:,1]-(SNco[1]-cutoutsize_new/2.), fmt='s',mfc='none',markeredgecolor='C0',markersize=8,markeredgewidth=1.5)
 
@@ -1730,8 +1738,8 @@ for f in usedfilters:
 
                 ax1.set_title('Template-subtracted cutout')
 
-                ax1.set_xlim(0,len(data))
-                ax1.set_ylim(0,len(data))
+                ax1.set_xlim(0,len(data_sub))
+                ax1.set_ylim(0,len(data_sub))
 
                 ax1.get_yaxis().set_visible(False)
                 ax1.get_xaxis().set_visible(False)
@@ -1748,6 +1756,15 @@ for f in usedfilters:
                 if not happy: happy = 'y'
                 
                 if happy not in ('y','yes'):
+                
+                    try_again = input('\nTry varying parameters? (y/n) [y] ')
+                    if not try_again: try_again = 'y'
+
+                    if try_again not in ('y','yes'):
+                        print('\nUsing unsubtracted data')
+                        template = ''
+                        break
+
                     cutoutsize1 = input('Try larger cutout size? ['+str(cutoutsize_new)+']')
                     if not cutoutsize1: cutoutsize1 = cutoutsize_new
                     cutoutsize_new = int(cutoutsize1)
@@ -1764,7 +1781,9 @@ for f in usedfilters:
                     SNco[1] = cutoutsize_new/2.
                     cutout_loop = 'n'
 
-
+                data = data_sub
+                bkg_error = bkg_new_error
+                
 
     ########### SN photometry
 
