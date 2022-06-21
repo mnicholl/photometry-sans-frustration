@@ -1354,8 +1354,7 @@ for f in usedfilters:
     
         if sub == True:
  
-            if not quiet:
-                conti = input('\n > Proceed to template image... (return)')
+            print('\nBuilding PSF for TEMPLATE image alignment')
 
             tmp = fits.open(template)
 
@@ -1610,6 +1609,8 @@ for f in usedfilters:
             plt.close(fig2)
             
             
+            print(data.shape)
+            
             # Make cutouts for subtraction
 
             cutout_loop = 'y'
@@ -1656,6 +1657,8 @@ for f in usedfilters:
 
                 im2 = im2[1]
 
+
+            print(data.shape)
 
             while cutout_loop == 'y':
 
@@ -1706,7 +1709,6 @@ for f in usedfilters:
                     
                     continue
             
-            
                 im_sub = np.real(im_sub[0])
                 
                 im_sci.data = im_sub
@@ -1752,6 +1754,7 @@ for f in usedfilters:
                 
                 plt.draw()
 
+                do_sub = True
                 happy = input('\nProceed with this subtraction? [y] ')
                 if not happy: happy = 'y'
                 
@@ -1763,6 +1766,8 @@ for f in usedfilters:
                     if try_again not in ('y','yes'):
                         print('\nUsing unsubtracted data')
                         template = ''
+                        do_sub = False
+    
                         break
 
                     cutoutsize1 = input('Try larger cutout size? ['+str(cutoutsize_new)+']')
@@ -1776,14 +1781,20 @@ for f in usedfilters:
                     sci_sat1 = input('Try lower science saturation? ['+str(sci_sat_new)+']')
                     if not sci_sat1: sci_sat1 = sci_sat_new
                     sci_sat_new = int(sci_sat1)
+                    
+                    continue
+                    
                 else:
-                    SNco[0] = cutoutsize_new/2.
-                    SNco[1] = cutoutsize_new/2.
+                    do_sub = True
                     cutout_loop = 'n'
 
-                data = data_sub
-                bkg_error = bkg_new_error
-                
+
+                if do_sub == True:
+                    data = data_sub
+                    bkg_error = bkg_new_error
+                    SNco[0] = cutoutsize_new/2.
+                    SNco[1] = cutoutsize_new/2.
+
 
     ########### SN photometry
 
