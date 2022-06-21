@@ -935,108 +935,114 @@ for f in usedfilters:
         happy = 'n'
         while happy not in ('y','yes'):
         
-            # extract stars from image
-            psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*stamprad+5)
-            while(len(psfstars))<5 and psfthresh>0:
-                print('Warning: too few PSF stars with threshold '+str(psfthresh)+' sigma, trying lower sigma')
-                psfthresh -= 1
+            # psf quality tests
+            sumpsf = -1
+            minpsf = -1
+            x_peak = 0
+            y_peak = 0
+            
+            psf_iter = 0
+            
+            while (sumpsf < 0) or (minpsf < -0.01) or ((x_peak/len(psf) < 0.4) or (x_peak/len(psf) > 0.6)) or ((y_peak/len(psf) < 0.4) or (y_peak/len(psf) > 0.6)) and (psf_iter < 5):
+            
+                if psf_iter > 0:
+                    print('PSF failed quality checked, randomly varying parameters and trying again')
+                    stamprad += np.random.randint(10)-5
+                    psfthresh += np.random.randint(10)
+
+                # extract stars from image
                 psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*stamprad+5)
-            if len(psfstars)<5:
-                psfthresh = psfthresh0
-                while(len(psfstars))<3 and psfthresh>0:
+                while(len(psfstars))<5 and psfthresh>0:
+                    print('Warning: too few PSF stars with threshold '+str(psfthresh)+' sigma, trying lower sigma')
                     psfthresh -= 1
                     psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*stamprad+5)
-                if psfthresh < 3:
+                if len(psfstars)<5:
+                    psfthresh = psfthresh0
+                    while(len(psfstars))<3 and psfthresh>0:
+                        psfthresh -= 1
+                        psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*stamprad+5)
+                    if psfthresh < 3:
+                        empirical = False
+                        break
+
+                ax1.clear()
+                
+                ax1.imshow(data, origin='lower',cmap='gray',
+                            vmin=visualization.ZScaleInterval().get_limits(data)[0],
+                            vmax=visualization.ZScaleInterval().get_limits(data)[1])
+
+                ax1.set_title(image+' ('+f+')')
+
+                ax1.set_xlim(0,len(data))
+                ax1.set_ylim(0,len(data))
+
+                ax1.get_yaxis().set_visible(False)
+                ax1.get_xaxis().set_visible(False)
+                
+                ax1.errorbar(SNco[0],SNco[1],fmt='o',markeredgecolor='r',mfc='none',
+                                markeredgewidth=3,markersize=20)
+
+                ax1.errorbar(co[:,0],co[:,1],fmt='s',mfc='none',markeredgecolor='C0',
+                                                markersize=8,markeredgewidth=1.5)
+
+                ax1.errorbar(psfstars.center_flat[:,0],psfstars.center_flat[:,1],fmt='*',mfc='none', markeredgecolor='lime',markeredgewidth=2, markersize=20,label='Used in PSF fit')
+
+                ax1.legend(frameon=True,fontsize=16)
+
+
+                # build PSF
+            
+                try:
+                    epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
+                                    oversampling=samp,smoothing_kernel='quadratic',shape=2*stamprad-1)
+                    epsf, fitted_stars = epsf_builder(psfstars)
+
+                    psf = epsf.data
+                    
+                    x_peak = np.where(psf==psf.max())[1][0]
+                    y_peak = np.where(psf==psf.max())[0][0]
+                    
+                    minpsf = np.min(psf)
+                    sumpsf = np.sum(psf)
+                    
+                    psf_iter += 1
+  
+                    ax2 = plt.subplot2grid((2,5),(0,3))
+
+                    ax2.imshow(psf, origin='lower',cmap='gray',
+                                vmin=visualization.ZScaleInterval().get_limits(psf)[0],
+                                vmax=visualization.ZScaleInterval().get_limits(psf)[1])
+
+                    ax2.get_yaxis().set_visible(False)
+                    ax2.get_xaxis().set_visible(False)
+
+                    ax2.set_title('PSF')
+
+                    plt.draw()
+
+
+                    ax3 = plt.subplot2grid((2,5),(0,4),projection='3d')
+
+                    tmpArr = range(len(psf))
+
+                    X, Y = np.meshgrid(tmpArr,tmpArr)
+
+                    ax3.plot_surface(X,Y,psf,rstride=1,cstride=1,cmap='viridis_r',alpha=0.5)
+
+                    ax3.set_zlim(np.min(psf),np.max(psf)*1.1)
+
+                    ax3.set_axis_off()
+
+                    plt.draw()
+
+                    plt.tight_layout(pad=0.5)
+                    
+                    empirical = True
+
+                            
+                except:
+                    print('PSF fit failed (usually a weird EPSF_builder error):\nTrying different stamp size usually fixes!')
                     empirical = False
-                    break
-
-            ax1.clear()
-            
-            ax1.imshow(data, origin='lower',cmap='gray',
-                        vmin=visualization.ZScaleInterval().get_limits(data)[0],
-                        vmax=visualization.ZScaleInterval().get_limits(data)[1])
-
-            ax1.set_title(image+' ('+f+')')
-
-            ax1.set_xlim(0,len(data))
-            ax1.set_ylim(0,len(data))
-
-            ax1.get_yaxis().set_visible(False)
-            ax1.get_xaxis().set_visible(False)
-            
-            ax1.errorbar(SNco[0],SNco[1],fmt='o',markeredgecolor='r',mfc='none',
-                            markeredgewidth=3,markersize=20)
-
-            ax1.errorbar(co[:,0],co[:,1],fmt='s',mfc='none',markeredgecolor='C0',
-                                            markersize=8,markeredgewidth=1.5)
-
-            ax1.errorbar(psfstars.center_flat[:,0],psfstars.center_flat[:,1],fmt='*',mfc='none', markeredgecolor='lime',markeredgewidth=2, markersize=20,label='Used in PSF fit')
-
-            ax1.legend(frameon=True,fontsize=16)
-
-
-            # build PSF
-            try:
-                epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
-                                oversampling=samp,smoothing_kernel='quadratic',shape=2*stamprad-1)
-                epsf, fitted_stars = epsf_builder(psfstars)
-
-                psf = epsf.data
-                
-                # determine aperture size and correction
-                
-    #            pix_frac = 0.5 # Optimal radius for S/N is R ~ FWHM. But leads to large aperture correction
-    #            pix_frac = 0.1 # Aperture containing 90% of flux. Typically gives a radius ~ 2*FWHM
-
-                pix_frac = np.max([1-apfrac,0.05])
-
-                aprad_opt = np.sqrt(len(psf[psf>np.max(psf)*pix_frac])/np.pi)
-                
-                test_ap = photutils.CircularAperture([len(psf[0])/2,len(psf[0])/2], r=aprad_opt)
-                                
-                testTab = photutils.aperture_photometry(psf,test_ap)
-                
-                apfrac_verify = testTab['aperture_sum'][0]/np.sum(psf) # fraction of flux contained in aprad_opt
-
-                ap_corr = 2.5*np.log10(apfrac_verify)
-                
-
-                ax2 = plt.subplot2grid((2,5),(0,3))
-
-                ax2.imshow(psf, origin='lower',cmap='gray',
-                            vmin=visualization.ZScaleInterval().get_limits(psf)[0],
-                            vmax=visualization.ZScaleInterval().get_limits(psf)[1])
-
-                ax2.get_yaxis().set_visible(False)
-                ax2.get_xaxis().set_visible(False)
-
-                ax2.set_title('PSF')
-
-                plt.draw()
-
-
-                ax3 = plt.subplot2grid((2,5),(0,4),projection='3d')
-
-                tmpArr = range(len(psf))
-
-                X, Y = np.meshgrid(tmpArr,tmpArr)
-
-                ax3.plot_surface(X,Y,psf,rstride=1,cstride=1,cmap='viridis_r',alpha=0.5)
-
-                ax3.set_zlim(np.min(psf),np.max(psf)*1.1)
-
-                ax3.set_axis_off()
-
-                plt.draw()
-
-                plt.tight_layout(pad=0.5)
-                
-                empirical = True
-                
-                
-            except:
-                print('PSF fit failed (usually a weird EPSF_builder error):\nTrying different stamp size usually fixes!')
-                empirical = False
 
 
             if not quiet:
@@ -1065,8 +1071,11 @@ for f in usedfilters:
         if empirical == False:
             print('\nNo PSF determined, using basic Gaussian model')
             
-            sigma_gauss = input('Please specify width (sigma) in pixels ['+str(sigma_gauss_0)+'] ')
-            if not sigma_gauss: sigma_gauss = sigma_gauss_0
+            if not quiet:
+                sigma_gauss = input('Please specify width (sigma) in pixels ['+str(sigma_gauss_0)+'] ')
+                if not sigma_gauss: sigma_gauss = sigma_gauss_0
+            else:
+                sigma_gauss = sigma_gauss_0
             sigma_gauss = float(sigma_gauss)
             
             epsf = IntegratedGaussianPRF(sigma=sigma_gauss)
@@ -1076,24 +1085,7 @@ for f in usedfilters:
             for xt in np.arange(2*stamprad+1):
                 for yt in np.arange(2*stamprad+1):
                     psf[xt,yt] = epsf.evaluate(xt,yt,x_0=stamprad,y_0=stamprad,sigma=sigma_gauss,flux=1)
-            
-            # determine aperture size and correction
-            
-#            pix_frac = 0.5 # Optimal radius for S/N is R ~ FWHM. But leads to large aperture correction
-#            pix_frac = 0.1 # Aperture containing 90% of flux. Typically gives a radius ~ 2*FWHM
-
-            pix_frac = np.max([1-apfrac,0.05])
-
-            aprad_opt = np.sqrt(len(psf[psf>np.max(psf)*pix_frac])/np.pi)
-            
-            test_ap = photutils.CircularAperture([len(psf[0])/2,len(psf[0])/2], r=aprad_opt)
-            
-            testTab = photutils.aperture_photometry(psf,test_ap)
-            
-            apfrac_verify = testTab['aperture_sum'][0]/np.sum(psf) # fraction of flux contained in aprad_opt
-
-            ap_corr = 2.5*np.log10(apfrac_verify)
-
+        
 
             ax2 = plt.subplot2grid((2,5),(0,3))
 
@@ -1129,6 +1121,24 @@ for f in usedfilters:
                 
         scipsf = fits.PrimaryHDU(psf)
         scipsf.writeto('sci_psf.fits',overwrite=True)
+
+
+        # determine aperture size and correction
+        
+#            pix_frac = 0.5 # Optimal radius for S/N is R ~ FWHM. But leads to large aperture correction
+#            pix_frac = 0.1 # Aperture containing 90% of flux. Typically gives a radius ~ 2*FWHM
+
+        pix_frac = np.max([1-apfrac,0.05])
+
+        aprad_opt = np.sqrt(len(psf[psf>np.max(psf)*pix_frac])/np.pi)
+        
+        test_ap = photutils.CircularAperture([len(psf[0])/2,len(psf[0])/2], r=aprad_opt)
+        
+        testTab = photutils.aperture_photometry(psf,test_ap)
+        
+        apfrac_verify = testTab['aperture_sum'][0]/np.sum(psf) # fraction of flux contained in aprad_opt
+
+        ap_corr = 2.5*np.log10(apfrac_verify)
 
 
         print('\n\nDoing aperture photometry for optimal aperture...')
@@ -1354,7 +1364,7 @@ for f in usedfilters:
     
         if sub == True:
  
-            print('\nBuilding PSF for TEMPLATE image alignment')
+            print('\nAligning template image and building template PSF')
 
             tmp = fits.open(template)
 
@@ -1500,66 +1510,89 @@ for f in usedfilters:
             happy = 'n'
             while happy not in ('y','yes'):
 
-                psfstars2 = photutils.psf.extract_stars(nddata2, psfinput2[photTab2['aperture_sum']>psfthresh2*photTab2['aperture_sum_err']], size=2*stamprad2+5)
-                while(len(psfstars2))<5 and psfthresh2>0:
-                    print('Warning: too few PSF stars with threshold '+str(psfthresh2)+' sigma, trying lower sigma')
-                    psfthresh2 -= 1
+                sumpsf = -1
+                minpsf = -1
+                x_peak = 0
+                y_peak = 0
+                
+                psf_iter = 0
+                
+                while (sumpsf < 0) or (minpsf < -0.01) or ((x_peak/len(psf2) < 0.4) or (x_peak/len(psf2) > 0.6)) or ((y_peak/len(psf2) < 0.4) or (y_peak/len(psf2) > 0.6)) and (psf_iter < 5):
+                
+                    if psf_iter > 0:
+                        print('PSF failed quality checked, randomly varying parameters and trying again')
+                        stamprad2 += np.random.randint(10)-5
+                        psfthresh2 = psfthresh0 + np.random.randint(20)
+
                     psfstars2 = photutils.psf.extract_stars(nddata2, psfinput2[photTab2['aperture_sum']>psfthresh2*photTab2['aperture_sum_err']], size=2*stamprad2+5)
-                if len(psfstars2)<5:
-                    psfthresh2 = psfthresh0
-                    while(len(psfstars2))<3 and psfthresh2>0:
+                    while(len(psfstars2))<5 and psfthresh2>0:
+                        print('Warning: too few PSF stars with threshold '+str(psfthresh2)+' sigma, trying lower sigma')
                         psfthresh2 -= 1
                         psfstars2 = photutils.psf.extract_stars(nddata2, psfinput2[photTab2['aperture_sum']>psfthresh2*photTab2['aperture_sum_err']], size=2*stamprad2+5)
+                    if len(psfstars2)<5:
+                        psfthresh2 = psfthresh0
+                        while(len(psfstars2))<3 and psfthresh2>0:
+                            psfthresh2 -= 1
+                            psfstars2 = photutils.psf.extract_stars(nddata2, psfinput2[photTab2['aperture_sum']>psfthresh2*photTab2['aperture_sum_err']], size=2*stamprad2+5)
 
 
-                ax1t.errorbar(psfstars2.center_flat[:,0],psfstars2.center_flat[:,1],fmt='*',mfc='none', markeredgecolor='lime',markeredgewidth=2, markersize=20,label='Used in PSF fit')
-                
-                
-                # build PSF
-                try:
-                    epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
-                                    oversampling=samp2,smoothing_kernel='quadratic',shape=2*stamprad2-1)
-                    epsf2, fitted_stars2 = epsf_builder(psfstars2)
-
-                    psf2 = epsf2.data
-
-                    ax2t = plt.subplot2grid((2,5),(0,3))
-
-                    ax2t.imshow(psf2, origin='lower',cmap='gray',
-                                vmin=visualization.ZScaleInterval().get_limits(psf2)[0],
-                                vmax=visualization.ZScaleInterval().get_limits(psf2)[1])
-
-                    ax2t.get_yaxis().set_visible(False)
-                    ax2t.get_xaxis().set_visible(False)
-
-                    ax2t.set_title('PSF')
-
-                    plt.draw()
-
+                    ax1t.errorbar(psfstars2.center_flat[:,0],psfstars2.center_flat[:,1],fmt='*',mfc='none', markeredgecolor='lime',markeredgewidth=2, markersize=20,label='Used in PSF fit')
                     
-
-                    ax3t = plt.subplot2grid((2,5),(0,4),projection='3d')
-
-                    tmpArr2 = range(len(psf2))
-
-                    X2, Y2 = np.meshgrid(tmpArr2,tmpArr2)
-
-                    ax3t.plot_surface(X2,Y2,psf2,rstride=1,cstride=1,cmap='viridis_r',alpha=0.5)
-
-                    ax3t.set_zlim(np.min(psf2),np.max(psf2)*1.1)
-
-                    ax3t.set_axis_off()
-
-                    plt.draw()
-
-                    plt.tight_layout(pad=0.5)
                     
-                    empirical = True
+                    # build PSF
+                    try:
+                        epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
+                                        oversampling=samp2,smoothing_kernel='quadratic',shape=2*stamprad2-1)
+                        epsf2, fitted_stars2 = epsf_builder(psfstars2)
 
- 
-                except:
-                    print('PSF fit failed (usually a weird EPSF_builder error):\nTrying different stamp size usually fixes!')
-                    empirical = False
+                        psf2 = epsf2.data
+                        
+                        x_peak = np.where(psf2==psf2.max())[1][0]
+                        y_peak = np.where(psf2==psf2.max())[0][0]
+                        
+                        minpsf = np.min(psf2)
+                        sumpsf = np.sum(psf2)
+                        
+                        psf_iter += 1
+
+
+                        ax2t = plt.subplot2grid((2,5),(0,3))
+
+                        ax2t.imshow(psf2, origin='lower',cmap='gray',
+                                    vmin=visualization.ZScaleInterval().get_limits(psf2)[0],
+                                    vmax=visualization.ZScaleInterval().get_limits(psf2)[1])
+
+                        ax2t.get_yaxis().set_visible(False)
+                        ax2t.get_xaxis().set_visible(False)
+
+                        ax2t.set_title('PSF')
+
+                        plt.draw()
+
+                        
+
+                        ax3t = plt.subplot2grid((2,5),(0,4),projection='3d')
+
+                        tmpArr2 = range(len(psf2))
+
+                        X2, Y2 = np.meshgrid(tmpArr2,tmpArr2)
+
+                        ax3t.plot_surface(X2,Y2,psf2,rstride=1,cstride=1,cmap='viridis_r',alpha=0.5)
+
+                        ax3t.set_zlim(np.min(psf2),np.max(psf2)*1.1)
+
+                        ax3t.set_axis_off()
+
+                        plt.draw()
+
+                        plt.tight_layout(pad=0.5)
+                        
+                        empirical = True
+
+     
+                    except:
+                        print('PSF fit failed (usually a weird EPSF_builder error):\nTrying different stamp size usually fixes!')
+                        empirical = False
 
 
                 if not quiet:
@@ -1684,30 +1717,38 @@ for f in usedfilters:
                     'tmpl_psf.fits',normalization='science',n_stamps=4,science_saturation=sci_sat_new, reference_saturation=tmpl_sat_new)
                                         
                 except:
-                    print('Subtraction failed - can vary parameters or proceed without subtraction')
-                    
-                    try_again = input('\nTry varying parameters? (y/n) [y] ')
-                    if not try_again: try_again = 'y'
+                    if not quiet:
+                        print('Subtraction failed - can vary parameters or proceed without subtraction')
+                        
+                        try_again = input('\nTry varying parameters? (y/n) [y] ')
+                        if not try_again: try_again = 'y'
 
-                    if try_again not in ('y','yes'):
+                        if try_again not in ('y','yes'):
+                            print('\nUsing unsubtracted data')
+                            template = ''
+                            break
+        
+                        cutoutsize1 = input('Try larger cutout size? ['+str(cutoutsize_new)+']')
+                        if not cutoutsize1: cutoutsize1 = cutoutsize_new
+                        cutoutsize_new = int(cutoutsize1)
+        
+                        tmpl_sat1 = input('Try lower template saturation? ['+str(tmpl_sat_new)+']')
+                        if not tmpl_sat1: tmpl_sat1 = tmpl_sat_new
+                        tmpl_sat_new = int(tmpl_sat1)
+        
+                        sci_sat1 = input('Try lower science saturation? ['+str(sci_sat_new)+']')
+                        if not sci_sat1: sci_sat1 = sci_sat_new
+                        sci_sat_new = int(sci_sat1)
+                        
+                        continue
+                    else:
                         print('\nUsing unsubtracted data')
                         template = ''
+                        comment1 += 'subtraction failed'
+                        do_sub = False
+    
                         break
-    
-                    cutoutsize1 = input('Try larger cutout size? ['+str(cutoutsize_new)+']')
-                    if not cutoutsize1: cutoutsize1 = cutoutsize_new
-                    cutoutsize_new = int(cutoutsize1)
-    
-                    tmpl_sat1 = input('Try lower template saturation? ['+str(tmpl_sat_new)+']')
-                    if not tmpl_sat1: tmpl_sat1 = tmpl_sat_new
-                    tmpl_sat_new = int(tmpl_sat1)
-    
-                    sci_sat1 = input('Try lower science saturation? ['+str(sci_sat_new)+']')
-                    if not sci_sat1: sci_sat1 = sci_sat_new
-                    sci_sat_new = int(sci_sat1)
-                    
-                    continue
-            
+
                 im_sub = np.real(im_sub[0])
                 
                 im_sci.data = im_sub
@@ -1754,35 +1795,40 @@ for f in usedfilters:
                 plt.draw()
 
                 do_sub = True
-                happy = input('\nProceed with this subtraction? [y] ')
-                if not happy: happy = 'y'
                 
-                if happy not in ('y','yes'):
-                
-                    try_again = input('\nTry varying parameters? (y/n) [y] ')
-                    if not try_again: try_again = 'y'
-
-                    if try_again not in ('y','yes'):
-                        print('\nUsing unsubtracted data')
-                        template = ''
-                        do_sub = False
-    
-                        break
-
-                    cutoutsize1 = input('Try larger cutout size? ['+str(cutoutsize_new)+']')
-                    if not cutoutsize1: cutoutsize1 = cutoutsize_new
-                    cutoutsize_new = int(cutoutsize1)
-    
-                    tmpl_sat1 = input('Try lower template saturation? ['+str(tmpl_sat_new)+']')
-                    if not tmpl_sat1: tmpl_sat1 = tmpl_sat_new
-                    tmpl_sat_new = int(tmpl_sat1)
-    
-                    sci_sat1 = input('Try lower science saturation? ['+str(sci_sat_new)+']')
-                    if not sci_sat1: sci_sat1 = sci_sat_new
-                    sci_sat_new = int(sci_sat1)
+                if not quiet:
+                    happy = input('\nProceed with this subtraction? [y] ')
+                    if not happy: happy = 'y'
                     
-                    continue
+                    if happy not in ('y','yes'):
                     
+                        try_again = input('\nTry varying parameters? (y/n) [y] ')
+                        if not try_again: try_again = 'y'
+
+                        if try_again not in ('y','yes'):
+                            print('\nUsing unsubtracted data')
+                            template = ''
+                            do_sub = False
+        
+                            break
+
+                        cutoutsize1 = input('Try larger cutout size? ['+str(cutoutsize_new)+']')
+                        if not cutoutsize1: cutoutsize1 = cutoutsize_new
+                        cutoutsize_new = int(cutoutsize1)
+        
+                        tmpl_sat1 = input('Try lower template saturation? ['+str(tmpl_sat_new)+']')
+                        if not tmpl_sat1: tmpl_sat1 = tmpl_sat_new
+                        tmpl_sat_new = int(tmpl_sat1)
+        
+                        sci_sat1 = input('Try lower science saturation? ['+str(sci_sat_new)+']')
+                        if not sci_sat1: sci_sat1 = sci_sat_new
+                        sci_sat_new = int(sci_sat1)
+                        
+                        continue
+                    else:
+                        do_sub = True
+                        cutout_loop = 'n'
+
                 else:
                     do_sub = True
                     cutout_loop = 'n'
@@ -1968,7 +2014,7 @@ for f in usedfilters:
             
             calMagLim = ulim
 
-            comment1 = 'instrumental mag only'
+            comment1 += ' instrumental mag only'
 
 
         print('> PSF mag = '+'%.2f +/- %.2f' %(calMagPsf,errMagPsf))
