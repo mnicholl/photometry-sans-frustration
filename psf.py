@@ -148,7 +148,7 @@ parser.add_argument('--stack', dest='stack', default=False, action='store_true',
 parser.add_argument('--sub', dest='sub', default=False, action='store_true',
                     help='Subtract template images')
 
-parser.add_argument('--cut', dest='cut', default=600, type=int,
+parser.add_argument('--cut', dest='cut', default=1200, type=int,
                     help='Cutout size for image subtraction')
 
 parser.add_argument('--sci-sat', dest='sci_sat', default=50000, type=int,
@@ -443,7 +443,7 @@ if not os.path.exists(outdir): os.makedirs(outdir)
 # A file to write final magnitudes
 results_filename = os.path.join(outdir,'PSF_phot_'+str(int(time.time()))+'.txt')
 outFile = open(results_filename,'w')
-outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAPmag_opt\terr\tAPmag_big\terr\tLimit\tZP\terr\ttemplate\tcomments')
+outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tLimit\tZP\terr\ttemplate\tcomments')
 
 
 
@@ -1131,7 +1131,7 @@ for f in usedfilters:
         scipsf.writeto('sci_psf.fits',overwrite=True)
 
 
-        print('\nDoing aperture photometry for optimal aperture...')
+        print('\n\nDoing aperture photometry for optimal aperture...')
 
         photaps_opt = photutils.CircularAperture(co, r=aprad_opt)
 
@@ -1588,8 +1588,11 @@ for f in usedfilters:
             if empirical == False:
                 print('\nNo PSF determined, using basic Gaussian model')
                 
-                sigma_gauss2 = input('Please specify width (sigma) in pixels ['+str(sigma_gauss_0)+'] ')
-                if not sigma_gauss2: sigma_gauss2 = sigma_gauss_0
+                if not quiet:
+                    sigma_gauss2 = input('Please specify width (sigma) in pixels ['+str(sigma_gauss_0)+'] ')
+                    if not sigma_gauss2: sigma_gauss2 = sigma_gauss_0
+                else:
+                    sigma_gauss2 = sigma_gauss_0
                 sigma_gauss2 = float(sigma_gauss2)
                 
                 epsf2 = IntegratedGaussianPRF(sigma=sigma_gauss2)
@@ -1608,9 +1611,7 @@ for f in usedfilters:
             
             plt.close(fig2)
             
-            
-            print(data.shape)
-            
+                        
             # Make cutouts for subtraction
 
             cutout_loop = 'y'
@@ -1657,8 +1658,6 @@ for f in usedfilters:
 
                 im2 = im2[1]
 
-
-            print(data.shape)
 
             while cutout_loop == 'y':
 
