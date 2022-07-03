@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-version = '1.3'
+version = '1.4'
 
 '''
     PSF: PHOTOMETRY SANS FRUSTRATION
@@ -100,6 +100,9 @@ parser.add_argument('--ims','-i', dest='file_to_reduce', default='', nargs='+',
                     help='List of files to reduce (accepts wildcards or '
                     'space-delimited list)')
 
+parser.add_argument('--coords','-c', dest='coords', default=[None,None], nargs=2, type=float,
+                    help='Coordinates of target')
+
 parser.add_argument('--magmin', dest='magmin', default=20.5, type=float,
                     help='Faintest sequence stars to use')
 
@@ -188,6 +191,8 @@ keep = args.keep
 forcepos = args.forcepos
 
 ims = [i for i in args.file_to_reduce]
+
+coords1 = [i for i in args.coords]
 
 # If no images provided, run on all images in directory
 if len(ims) == 0:
@@ -461,21 +466,25 @@ plt.show()
 
 # Search for SN coordinates file (1 line: RA Dec) in this directory and parents
 
-suggSn = glob.glob('*coords.txt')
-if len(suggSn)==0:
-    suggSn = glob.glob('../*coords.txt')
-if len(suggSn)==0:
-    suggSn = glob.glob('../../*coords.txt')
-
-# Needs SN coords to run!
-if len(suggSn)>0:
-    snFile = suggSn[0]
+if coords1[0] and coords1[1]:
+    RAdec = np.array(coords1)
+    
 else:
-    sys.exit('Error: no SN coordinates (*_coords.txt) found')
+    suggSn = glob.glob('*coords.txt')
+    if len(suggSn)==0:
+        suggSn = glob.glob('../*coords.txt')
+    if len(suggSn)==0:
+        suggSn = glob.glob('../../*coords.txt')
 
-print('\n####################\n\nSN coordinates found: '+snFile)
+    # Needs SN coords to run!
+    if len(suggSn)>0:
+        snFile = suggSn[0]
+    else:
+        sys.exit('No SN coordinates. Please supply via -c RA DEC or *_coords.txt')
 
-RAdec = np.genfromtxt(snFile)
+    print('\n####################\n\nSN coordinates found: '+snFile)
+
+    RAdec = np.genfromtxt(snFile)
 
 
 
