@@ -1053,6 +1053,8 @@ for f in usedfilters:
                     print('PSF fit failed (usually a weird EPSF_builder error):\nTrying different stamp size usually fixes!')
                     empirical = False
 
+                    psf_iter += 1
+
 
             if not quiet:
                 if empirical == True:
@@ -1602,6 +1604,8 @@ for f in usedfilters:
                     except:
                         print('PSF fit failed (usually a weird EPSF_builder error):\nTrying different stamp size usually fixes!')
                         empirical = False
+
+                        psf_iter += 1
 
 
                 if not quiet:
