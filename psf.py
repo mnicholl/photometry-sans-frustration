@@ -862,7 +862,11 @@ for f in usedfilters:
         try:
             err_array = calc_total_error(data, bkg_error, gain)
         except:
-            err_array = calc_total_error(data.astype(float), bkg_error.astype(float), float(gain))
+            data_adu = data.copy()
+            data = np.array([i.astype(float) for i in data_adu])
+            bkg_error_adu = bkg_error.copy()
+            bkg_error = np.array([i.astype(float) for i in bkg_error_adu])
+            err_array = calc_total_error(data, bkg_error, gain)
 
         axBKG = plt.subplot2grid((2,5),(0,2))
         
@@ -1499,7 +1503,11 @@ for f in usedfilters:
             try:
                 err_array2 = calc_total_error(data2, bkg_error2, gain2)
             except:
-                err_array2 = calc_total_error(data2.astype(float), bkg_error2.astype(float), float(gain2))
+                data2_adu = data2.copy()
+                data2 = np.array([i.astype(float) for i in data2_adu])
+                bkg_error2_adu = bkg_error2.copy()
+                bkg_error2 = np.array([i.astype(float) for i in bkg_error2_adu])
+                err_array2 = calc_total_error(data2, bkg_error2, gain2)
 
 
             plt.subplots_adjust(left=0.05,right=0.99,top=0.99,bottom=-0.05)
@@ -1951,7 +1959,11 @@ for f in usedfilters:
         try:
             err_array = calc_total_error(data, bkg_error, gain)
         except:
-            err_array = calc_total_error(data.astype(float), bkg_error.astype(float), float(gain))
+            data_adu = data.copy()
+            data = np.array([i.astype(float) for i in data_adu])
+            bkg_error_adu = bkg_error.copy()
+            bkg_error = np.array([i.astype(float) for i in bkg_error_adu])
+            err_array = calc_total_error(data, bkg_error, gain)
         SNphotTab = photutils.aperture_photometry(data, photap, err_array)
         SNphotTab['local_sky'] = bkg_local
         SNphotTab['aperture_sum_sub'] = SNphotTab['aperture_sum_1'] - bkg_local * photap[1].area
