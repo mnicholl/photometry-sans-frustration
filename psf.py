@@ -859,8 +859,11 @@ for f in usedfilters:
 
         data = data.astype(float) - bkg.background
         
-        err_array = calc_total_error(data, bkg_error, gain)
-        
+        try:
+            err_array = calc_total_error(data, bkg_error, gain)
+        except:
+            err_array = calc_total_error(data.astype(float), bkg_error.astype(float), float(gain))
+
         axBKG = plt.subplot2grid((2,5),(0,2))
         
         axBKG.imshow(bkg.background, origin='lower',cmap='viridis')
