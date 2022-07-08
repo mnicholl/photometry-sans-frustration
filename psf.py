@@ -72,7 +72,8 @@ import argparse
 from matplotlib.patches import Circle
 import requests
 from astropy import visualization
-from skimage.registration import phase_cross_correlation
+from skimage.registration import phase_cross_correlation, optical_flow_tvl1, optical_flow_ilk
+from skimage.transform import warp
 from scipy.ndimage import interpolation as interp
 import time
 from astroquery.sdss import SDSS
@@ -85,6 +86,7 @@ from reproject import reproject_interp
 from PyZOGY.subtract import run_subtraction
 from photutils.utils import calc_total_error
 from photutils.psf import IntegratedGaussianPRF
+from ccdproc import cosmicray_lacosmic as lacosmic
 import warnings
 
 
@@ -148,6 +150,9 @@ parser.add_argument('--quiet', dest='quiet', default=False, action='store_true',
 parser.add_argument('--stack', dest='stack', default=False, action='store_true',
                     help='Stack images that are in the same filter')
 
+parser.add_argument('--clean', dest='clean', default=False, action='store_true',
+                    help='Clean images with lacosmic')
+
 parser.add_argument('--sub', dest='sub', default=False, action='store_true',
                     help='Subtract template images')
 
@@ -183,6 +188,7 @@ sigClip = args.sigClip
 samp0 = args.samp
 quiet = args.quiet
 stack = args.stack
+clean = args.clean
 sub = args.sub
 cutoutsize = args.cut
 tmpl_sat = args.tmpl_sat
@@ -673,66 +679,87 @@ for f in usedfilters:
         seqMags[seqHead[i+2]] = seqDat[:,i+2]
 
 
-
+    already_clean = False
 
     zero_shift_image = ''
     
     dostack = 'n'
+    
+    ims2 = ims1.copy()
 
     if stack==True:
         dostack = 'y'
         if len(ims1) < 2:
             print('\nOnly 1 image in filter, skipping stacking!')
             dostack = 'n'
-        else:
-            if os.path.exists('stack_'+f+'.fits'):
-                if not quiet:
-                    dostack = input('\nStack already found in filter, overwrite? [n]')
-                    if not dostack: dostack = 'n'
-                else:
-                    dostack = 'n'
+        elif os.path.exists('stack_'+f+'.fits'):
+            if not quiet:
+                dostack = input('\nStack already found in filter, overwrite? [n]')
+                if not dostack: dostack = 'n'
+            else:
+                dostack = 'n'
+                
+            ims2 = ['stack_'+f+'.fits']
+
 
         if dostack in ('y','yes'):
             print('\nAligning and stacking images...')
+            try:
+                mjdstack = np.mean(filtertab[:,2][filtertab[:,1]==f].astype(float))
+
+                zero_shift_image = ims1[0]
+                
+    #            imshifts = {} # dictionary to hold the x and y shift pairs for each image
+    #            for im1 in ims1:
+    #                ## phase_cross_correlation is a function that calculates shifts by comparing 2-D arrays
+    #                imshift, imshifterr, diffphase = phase_cross_correlation(
+    #                    fits.getdata(zero_shift_image),
+    #                    fits.getdata(im1))
+    #                imshifts[im1] = imshift
+    #
+    #            ## new dictionary for shifted image data:
+    #            shifted_data = {}
+    #            for im1 in imshifts:
+    #                shifted_data[im1] = interp.shift(
+    #                    fits.getdata(im1),
+    #                    imshifts[im1])
+    #                shifted_data[im1][shifted_data[im1] == 0] = 'nan'
+
+                if clean == True:
+                    clean_zero, mask = lacosmic(fits.getdata(zero_shift_image))
+                    already_clean = True
+
+                shifted_data = {}
+                for im1 in ims1:
+                    if clean == True:
+                        print('Cleaning cosmics')
+                        clean_source, mask = lacosmic(fits.getdata(im1))
+                        registered, footprint = aa.register(clean_source, clean_zero, fill_value=np.nan)
+                    else:
+                        registered, footprint = aa.register(fits.getdata(im1), fits.getdata(zero_shift_image), fill_value=np.nan)
+
+                    shifted_data[im1] = registered
+
+                shifted_data_cube = np.stack([shifted_data[im1] for im1 in ims1])
+                stacked_data = np.nanmedian(shifted_data_cube, axis=0)
+                
+                stackheader = fits.getheader(zero_shift_image)
+                
+                stackheader['MJD'] = mjdstack
+                stackheader['MJD-OBS'] = mjdstack
+
+                fits.writeto('stack_'+f+'.fits',
+                        stacked_data,header=stackheader,
+                        overwrite=True)
+
+                print('Done')
+
+                ims2 = ['stack_'+f+'.fits']
             
-            mjdstack = np.mean(filtertab[:,2][filtertab[:,1]==f].astype(float))
-
-            zero_shift_image = ims1[0]
-            
-            imshifts = {} # dictionary to hold the x and y shift pairs for each image
-            for im1 in ims1:
-                ## phase_cross_correlation is a function that calculates shifts by comparing 2-D arrays
-                imshift, imshifterr, diffphase = phase_cross_correlation(
-                    fits.getdata(zero_shift_image),
-                    fits.getdata(im1))
-                imshifts[im1] = imshift
-
-            ## new dictionary for shifted image data:
-            shifted_data = {}
-            for im1 in imshifts:
-                shifted_data[im1] = interp.shift(
-                    fits.getdata(im1),
-                    imshifts[im1])
-                shifted_data[im1][shifted_data[im1] == 0] = 'nan'
-
-            shifted_data_cube = np.stack([shifted_data[im1] for im1 in ims1])
-            stacked_data = np.nanmedian(shifted_data_cube, axis=0)
-            
-            stackheader = fits.getheader(zero_shift_image)
-            
-            stackheader['MJD'] = mjdstack
-            stackheader['MJD-OBS'] = mjdstack
-
-            fits.writeto('stack_'+f+'.fits',
-                    stacked_data,header=stackheader,
-                    overwrite=True)
-
-            print('Done')
-
-        ims2 = ['stack_'+f+'.fits']
-
-    else:
-        ims2 = ims1.copy()
+            except:
+                print('Alignment/stacking failed, using single images')
+                already_clean = False
+                ims2 = ims1.copy()
 
     counter = 1
     
@@ -786,6 +813,10 @@ for f in usedfilters:
         except:
             gain = 1.0
 
+        if clean == True and already_clean == False:
+            print('\nCleaning cosmics...')
+            data, cosmicmask = lacosmic(data)
+            print('Done')
 
         # Set up sequence stars, initial steps
         
@@ -1666,26 +1697,14 @@ for f in usedfilters:
             sci_sat_new = sci_sat
             tmpl_sat_new = tmpl_sat
 
-            im_sci = fits.open(image)
+            data_orig = np.copy(data)
+            header_orig = header.copy()
 
-            try:
-                im_sci[0].verify('fix')
-
-                data_orig = im_sci[0].data
-                header_orig = im_sci[0].header
-                checkdat = len(data_orig)
-                
-                im_sci = im_sci[0]
-
-            except:
-                im_sci[1].verify('fix')
-
-                data_orig = im_sci[1].data
-                header_orig = im_sci[1].header
-                checkdat = len(data_orig)
-                
-                im_sci = im_sci[1]
-
+            im_sci = fits.PrimaryHDU()
+            im_sci.data = data_orig
+            im_sci.header = header_orig
+            
+            
             im2 = fits.open('tmpl_aligned.fits')
 
             try:
@@ -1847,11 +1866,30 @@ for f in usedfilters:
                     cutout_loop = 'n'
 
 
-                if do_sub == True:
-                    data = data_sub
-                    bkg_error = bkg_new_error
-                    SNco[0] = cutoutsize_new/2.
-                    SNco[1] = cutoutsize_new/2.
+            if do_sub == True:
+                data = data_sub
+                bkg_error = bkg_new_error
+                SNco[0] = cutoutsize_new/2.
+                SNco[1] = cutoutsize_new/2.
+            else:
+                plt.figure(1)
+
+                ax1.clear()
+                ax1.imshow(data, origin='lower',cmap='gray',
+                            vmin=visualization.ZScaleInterval().get_limits(data)[0],
+                            vmax=visualization.ZScaleInterval().get_limits(data)[1])
+
+                ax1.set_title(image+' ('+f+')')
+
+                ax1.set_xlim(0,len(data))
+                ax1.set_ylim(0,len(data))
+
+                ax1.get_yaxis().set_visible(False)
+                ax1.get_xaxis().set_visible(False)
+
+                ax1.errorbar(SNco[0],SNco[1],fmt='o',markeredgecolor='r',mfc='none',
+                                markeredgewidth=3,markersize=20)
+
 
 
     ########### SN photometry
