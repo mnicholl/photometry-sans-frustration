@@ -1496,7 +1496,10 @@ for f in usedfilters:
             
             bkg_error2 = bkg2.background_rms
 
-            err_array2 = calc_total_error(data2, bkg_error2, gain2)
+            try:
+                err_array2 = calc_total_error(data2, bkg_error2, gain2)
+            except:
+                err_array2 = calc_total_error(data2.astype(float), bkg_error2.astype(float), float(gain2))
 
 
             plt.subplots_adjust(left=0.05,right=0.99,top=0.99,bottom=-0.05)
@@ -1945,7 +1948,10 @@ for f in usedfilters:
         skydata_1d = skydata[skymask.data > 0]
         meansky, mediansky, sigsky = astropy.stats.sigma_clipped_stats(skydata_1d)
         bkg_local = np.array([mediansky])
-        err_array = calc_total_error(data, bkg_error, gain)
+        try:
+            err_array = calc_total_error(data, bkg_error, gain)
+        except:
+            err_array = calc_total_error(data.astype(float), bkg_error.astype(float), float(gain))
         SNphotTab = photutils.aperture_photometry(data, photap, err_array)
         SNphotTab['local_sky'] = bkg_local
         SNphotTab['aperture_sum_sub'] = SNphotTab['aperture_sum_1'] - bkg_local * photap[1].area
