@@ -150,6 +150,9 @@ parser.add_argument('--quiet', dest='quiet', default=False, action='store_true',
 parser.add_argument('--stack', dest='stack', default=False, action='store_true',
                     help='Stack images that are in the same filter')
 
+parser.add_argument('--timebins', dest='bin', default=1.0, type=float,
+                    help='Width of bins for stacking (in days)')
+
 parser.add_argument('--clean', dest='clean', default=False, action='store_true',
                     help='Clean images with lacosmic')
 
@@ -188,6 +191,7 @@ sigClip = args.sigClip
 samp0 = args.samp
 quiet = args.quiet
 stack = args.stack
+timebins = args.bin
 clean = args.clean
 sub = args.sub
 cutoutsize = args.cut
@@ -197,6 +201,8 @@ keep = args.keep
 forcepos = args.forcepos
 
 ims = [i for i in args.file_to_reduce]
+
+local_template_list = glob.glob('template_*.fits')
 
 coords1 = [i for i in args.coords]
 
@@ -215,6 +221,9 @@ if len(ims) == 0:
         ims.remove('sci_psf.fits')
     if 'sub.fits' in ims:
         ims.remove('sub.fits')
+    for i in local_template_list:
+        if i in ims:
+            ims.remove(i)
 
 
 
@@ -443,7 +452,7 @@ filtAll = 'u,g,r,i,z,U,B,V,R,I,J,H,K'
 
 
 
-print('#################################################\n#                                               #\n#  Welcome to PSF: Photometry Sans Frustration  #\n#                    (V'+version+')                     #\n#        Written by Matt Nicholl (2015)         #\n#                                               #\n#################################################')
+print('#################################################\n#                                               #\n#  Welcome to PSF: Photometry Sans Frustration  #\n#                    (V'+version+')                     #\n#      Written by Matt Nicholl (2015-2022)      #\n#                                               #\n#################################################')
 
 
 # A place to save output files
@@ -454,7 +463,7 @@ if not os.path.exists(outdir): os.makedirs(outdir)
 # A file to write final magnitudes
 results_filename = os.path.join(outdir,'PSF_phot_'+str(int(time.time()))+'.txt')
 outFile = open(results_filename,'w')
-outFile.write('#image\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tLimit\tZP\terr\ttemplate\tcomments')
+outFile.write('#image\ttarget\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tLimit\tZP\terr\ttemplate\tcomments')
 
 
 
@@ -602,7 +611,7 @@ for f in usedfilters:
 
     print('\n\n#########\n'+f+'-band\n#########')
 
-    ims1 = filtertab[:,0][filtertab[:,1]==f]
+    ims1 = filtertab[filtertab[:,1]==f]
     
     templates1 = filtertab[:,-1][filtertab[:,1]==f]
         
@@ -685,88 +694,125 @@ for f in usedfilters:
     
     dostack = 'n'
     
-    ims2 = ims1.copy()
+    ims2 = ims1[:,0].copy()
 
     if stack==True:
         dostack = 'y'
-        if len(ims1) < 2:
+        if len(ims1[:,0]) < 2:
             print('\nOnly 1 image in filter, skipping stacking!')
             dostack = 'n'
-        elif os.path.exists('stack_'+f+'.fits'):
+        elif len(glob.glob('stack*_'+f+'.fits')) > 0:
+            print('Already exists:')
+            print(glob.glob('stack*_'+f+'.fits'))
             if not quiet:
-                dostack = input('\nStack already found in filter, overwrite? [n]')
-                if not dostack: dostack = 'n'
+                use_existing = input('\nStack(s) already found in filter, use existing? \n (Note this will ignore unstacked data!) [y]')
+                if not use_existing: use_existing = 'y'
+                if use_existing == 'y':
+                    dostack = 'n'
+                    ims2 = glob.glob('stack*_'+f+'.fits')
             else:
                 dostack = 'n'
-                
-            ims2 = ['stack_'+f+'.fits']
 
 
         if dostack in ('y','yes'):
+            ims2 = []
             print('\nAligning and stacking images...')
-            try:
-                mjdstack = np.mean(filtertab[:,2][filtertab[:,1]==f].astype(float))
+            mintime = np.min(filtertab[:,2][filtertab[:,1]==f].astype(float))
+            maxtime = np.max(filtertab[:,2][filtertab[:,1]==f].astype(float))
+            timerange = maxtime-mintime
+            tlim = mintime
+            binedges = [mintime]
+            while tlim < maxtime:
+                tlim += timebins
+                binedges.append(tlim)
+            print('Time bins:')
+            print(binedges)
 
-                zero_shift_image = ims1[0]
-                
-    #            imshifts = {} # dictionary to hold the x and y shift pairs for each image
-    #            for im1 in ims1:
-    #                ## phase_cross_correlation is a function that calculates shifts by comparing 2-D arrays
-    #                imshift, imshifterr, diffphase = phase_cross_correlation(
-    #                    fits.getdata(zero_shift_image),
-    #                    fits.getdata(im1))
-    #                imshifts[im1] = imshift
-    #
-    #            ## new dictionary for shifted image data:
-    #            shifted_data = {}
-    #            for im1 in imshifts:
-    #                shifted_data[im1] = interp.shift(
-    #                    fits.getdata(im1),
-    #                    imshifts[im1])
-    #                shifted_data[im1][shifted_data[im1] == 0] = 'nan'
+            for bin in range(len(binedges)-1):
+                time_in_range = (ims1[:,2].astype(float)>=binedges[bin])&(ims1[:,2].astype(float)<binedges[bin+1])
+                stacktab = ims1[time_in_range]
+                if len(stacktab) > 1:
+                    try:
+                        mjdstack = np.mean(stacktab[:,2].astype(float))
 
-                if clean == True:
-                    clean_zero, mask = lacosmic(fits.getdata(zero_shift_image))
-                    already_clean = True
+                        zero_shift_image = stacktab[:,0][0]
+                        
+            #            imshifts = {} # dictionary to hold the x and y shift pairs for each image
+            #            for im1 in ims1[:,0]:
+            #                ## phase_cross_correlation is a function that calculates shifts by comparing 2-D arrays
+            #                imshift, imshifterr, diffphase = phase_cross_correlation(
+            #                    fits.getdata(zero_shift_image),
+            #                    fits.getdata(im1))
+            #                imshifts[im1] = imshift
+            #
+            #            ## new dictionary for shifted image data:
+            #            shifted_data = {}
+            #            for im1 in imshifts:
+            #                shifted_data[im1] = interp.shift(
+            #                    fits.getdata(im1),
+            #                    imshifts[im1])
+            #                shifted_data[im1][shifted_data[im1] == 0] = 'nan'
 
-                shifted_data = {}
-                for im1 in ims1:
+                        if clean == True:
+                            clean_zero, mask = lacosmic(fits.getdata(zero_shift_image))
+                            already_clean = True
+
+                        shifted_data = {}
+                        for im1 in stacktab[:,0]:
+                            if clean == True:
+                                print('Cleaning cosmics')
+                                clean_source, mask = lacosmic(fits.getdata(im1))
+                                registered, footprint = aa.register(clean_source, clean_zero, fill_value=np.nan)
+                            else:
+                                registered, footprint = aa.register(fits.getdata(im1), fits.getdata(zero_shift_image), fill_value=np.nan)
+
+                            shifted_data[im1] = registered
+
+                        shifted_data_cube = np.stack([shifted_data[im1] for im1 in stacktab[:,0]])
+                        stacked_data = np.nanmedian(shifted_data_cube, axis=0)
+                        
+                        stackheader = fits.getheader(zero_shift_image)
+                        
+                        stackheader['MJD'] = mjdstack
+                        stackheader['MJD-OBS'] = mjdstack
+
+                        fits.writeto('stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits',
+                                stacked_data,header=stackheader,
+                                overwrite=True)
+                        
+                        ims2.append('stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits')
+                        
+                        print('Stack done: ' + str(np.round(mjdstack,2)))
+
+                    except:
+                        print('Alignment/stacking failed in bin, using single images')
+                        for single_im in stacktab[:,0]:
+                            ims2.append(single_im)
+                            
+                elif len(stacktab[:,0]) == 1:
                     if clean == True:
-                        print('Cleaning cosmics')
-                        clean_source, mask = lacosmic(fits.getdata(im1))
-                        registered, footprint = aa.register(clean_source, clean_zero, fill_value=np.nan)
+                        try:
+                            print('Cleaning cosmics')
+                            clean_source, mask = lacosmic(fits.getdata(stacktab[0]))
+                            im_header = fits.getheader(stacktab[0])
+                            fits.writeto('clean_'+stacktab[2]+'_'+f+'.fits',
+                                    clean_source,header=im_header,
+                                    overwrite=True)
+                            already_clean = True
+                        except:
+                            ims2.append(stacktab[0])
                     else:
-                        registered, footprint = aa.register(fits.getdata(im1), fits.getdata(zero_shift_image), fill_value=np.nan)
-
-                    shifted_data[im1] = registered
-
-                shifted_data_cube = np.stack([shifted_data[im1] for im1 in ims1])
-                stacked_data = np.nanmedian(shifted_data_cube, axis=0)
+                        ims2.append(stacktab[0])
+                    
+                else:
+                    pass
                 
-                stackheader = fits.getheader(zero_shift_image)
-                
-                stackheader['MJD'] = mjdstack
-                stackheader['MJD-OBS'] = mjdstack
-
-                fits.writeto('stack_'+f+'.fits',
-                        stacked_data,header=stackheader,
-                        overwrite=True)
-
-                print('Done')
-
-                ims2 = ['stack_'+f+'.fits']
-            
-            except:
-                print('Alignment/stacking failed, using single images')
-                already_clean = False
-                ims2 = ims1.copy()
-
-    counter = 1
-    
     
 #################################
 # Part four: do some photometry
 #################################
+
+    counter = 1
 
     for image in ims2:
     
@@ -781,8 +827,8 @@ for f in usedfilters:
         
         counter += 1
 
-        if image == 'stack_'+f+'.fits':
-            mjd = fits.getval(filename='stack_'+f+'.fits',keyword='MJD')
+        if image in glob.glob('stack*_'+f+'.fits'):
+            mjd = fits.getval(image,keyword='MJD')
         else:
             mjd = filtertab[:,2][filtertab[:,0]==image][0]
 
@@ -790,6 +836,14 @@ for f in usedfilters:
 
         comment1 = ''
 
+        try:
+            target_name = fits.getval(image,'OBJECT')
+        except:
+            try:
+                target_name = fits.getval(image,'UNKNOWN')
+            except:
+                target_name = 'UNKNOWN'
+                
 
 ### NEED TO MAKE COMPATIBLE WITH NAMES OF IMAGE IN SUBTRACTION PART
 
@@ -2101,7 +2155,7 @@ for f in usedfilters:
         if comment1:
             comment += (' // '+comment1)
 
-        outFile.write('\n'+image+'\t'+f+ '\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP,errZP,template,comment))
+        outFile.write('\n'+image+'\t%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP,errZP,template,comment))
 #        outFile.write(comment)
 
 

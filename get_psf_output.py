@@ -51,16 +51,16 @@ for i in datfiles:
     for j in f.readlines():
         if j[0]!='#':
             data = j.split('\t')
-            band = data[1]
+            band = data[2]
             if band not in phot:
-                phot[band] = {'PSFerr': [], 'PSFmag': [], 'Aperr': [], 'Apmag': [], 'ApOpterr': [], 'ApOptmag': [], 'mjd': []}
-            phot[band]['mjd'].append(float(data[2]))
-            phot[band]['PSFmag'].append(float(data[3]))
-            phot[band]['PSFerr'].append(float(data[4]))
-            phot[band]['ApOptmag'].append(float(data[5]))
-            phot[band]['ApOpterr'].append(float(data[6]))
-            phot[band]['ApBigmag'].append(float(data[7]))
-            phot[band]['ApBigerr'].append(float(data[8]))
+                phot[band] = {'PSFerr': [], 'PSFmag': [], 'ApBigerr': [], 'ApBigmag': [], 'ApOpterr': [], 'ApOptmag': [], 'mjd': []}
+            phot[band]['mjd'].append(float(data[3]))
+            phot[band]['PSFmag'].append(float(data[4]))
+            phot[band]['PSFerr'].append(float(data[5]))
+            phot[band]['ApOptmag'].append(float(data[6]))
+            phot[band]['ApOpterr'].append(float(data[7]))
+            phot[band]['ApBigmag'].append(float(data[8]))
+            phot[band]['ApBigerr'].append(float(data[9]))
 
 
 for band in phot:
