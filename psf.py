@@ -344,6 +344,10 @@ def PS1cutouts(ra,dec,filt):
     except:
         print('\nPS1 template search failed!\n')
 
+        dest_file = ''
+        
+    return dest_file
+
 
 ##################################
 
@@ -370,7 +374,11 @@ def SDSScutouts(ra,dec,filt):
         print('Template downloaded as ' + dest_file + '\n')
 
     except:
-        print('\SDSS template search failed!\n')
+        print('SDSS template search failed!\n')
+        
+        dest_file = ''
+        
+    return dest_file
         
         
 def SDSScatalog(ra,dec,magmin=25,magmax=8):
@@ -581,16 +589,16 @@ for image in ims:
             print('No template found locally...')
             if filtername in ('g','r','i','z'):
                 try:
-                    PS1cutouts(RAdec[0],RAdec[1],filtername)
-                    template = 'template_'+filtername+'.fits'
+                    template = PS1cutouts(RAdec[0],RAdec[1],filtername)
                 except:
                     print('Error: could not match template from PS1')
+                    template = ''
             elif filtername == 'u':
                 try:
-                    SDSScutouts(RAdec[0],RAdec[1],filtername)
-                    template = 'template_'+filtername+'.fits'
+                    template = SDSScutouts(RAdec[0],RAdec[1],filtername)
                 except:
                     print('Error: could not match template from SDSS')
+                    template = ''
 
 
     filtertab.append([image, filtername, mjd, template])
@@ -615,12 +623,17 @@ for f in usedfilters:
     
     templates1 = filtertab[:,-1][filtertab[:,1]==f]
         
+    has_template = False
+        
     if sub==True:
         if len(np.unique(templates1)) > 1:
             print('Warning: different templates for same filter!')
             print('Using '+templates1[0])
         
         template = templates1[0]
+        
+        if len(template) > 0:
+            has_template = True
 
     ######## Search for sequence star file (RA, dec, mags)
 
@@ -1464,9 +1477,12 @@ for f in usedfilters:
 
         
     ########### Template subtraction
-    
-        if sub == True:
- 
+
+        if sub == True and has_template == False:
+            print('\nNo template associated to image, skipping subtraction')
+
+        elif sub == True and has_template == True:
+  
             print('\nAligning template image and building template PSF')
 
             tmp = fits.open(template)
@@ -1761,7 +1777,10 @@ for f in usedfilters:
 
             cutout_loop = 'y'
             
+            
             cutoutsize_new = cutoutsize
+            if f == 'u':
+                cutoutsize_new *= 2
             sci_sat_new = sci_sat
             tmpl_sat_new = tmpl_sat
 
