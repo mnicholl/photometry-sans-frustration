@@ -105,8 +105,8 @@ parser.add_argument('--ims','-i', dest='file_to_reduce', default='', nargs='+',
 parser.add_argument('--coords','-c', dest='coords', default=[None,None], nargs=2, type=float,
                     help='Coordinates of target')
 
-parser.add_argument('--magmin', dest='magmin', default=20.5, type=float,
-                    help='Faintest sequence stars to use')
+parser.add_argument('--magmin', dest='magmin', default=25, type=float,
+                    help='Faintest sequence stars to use (stars below 3 sigma will be removed anyway)')
 
 parser.add_argument('--magmax', dest='magmax', default=16.5, type=float,
                     help='Brightest sequence stars to use')
@@ -114,7 +114,7 @@ parser.add_argument('--magmax', dest='magmax', default=16.5, type=float,
 parser.add_argument('--shifts', dest='shifts', default=False, action='store_true',
                     help='Apply manual shifts if WCS is a bit off')
 
-parser.add_argument('--aprad', dest='aprad', default=15, type=int,
+parser.add_argument('--aprad', dest='aprad', default=10, type=int,
                     help='Radius for aperture photometry')
 
 parser.add_argument('--apfrac', dest='apfrac', default=0.9, type=float,
@@ -134,9 +134,6 @@ parser.add_argument('--psfthresh', dest='psfthresh', default=20., type=float,
 
 parser.add_argument('--sigma', dest='sigma_gauss', default=2., type=float,
                     help='Sigma for basic Gaussian PSF (used when insufficient stars)')
-
-parser.add_argument('--zpmethod', dest='zpmethod', default='psf', type=str,
-                    help='Use "psf" or "ap" mags to compute zeropoint')
 
 parser.add_argument('--zpsig', dest='sigClip', default=1, type=int,
                     help='Sigma clipping for rejecting sequence stars')
@@ -159,7 +156,10 @@ parser.add_argument('--clean', dest='clean', default=False, action='store_true',
 parser.add_argument('--sub', dest='sub', default=False, action='store_true',
                     help='Subtract template images')
 
-parser.add_argument('--cut', dest='cut', default=1200, type=int,
+parser.add_argument('--noalign', dest='noalign', default=False, action='store_true',
+                    help='Do not align template to image (use if already aligned)')
+
+parser.add_argument('--cut', dest='cut', default=600, type=int,
                     help='Cutout size for image subtraction')
 
 parser.add_argument('--sci-sat', dest='sci_sat', default=50000, type=int,
@@ -186,7 +186,6 @@ skyrad = args.skyrad
 bkgbox = args.bkgbox
 psfthresh0 = args.psfthresh
 sigma_gauss_0 = args.sigma_gauss
-zpmethod = args.zpmethod
 sigClip = args.sigClip
 samp0 = args.samp
 quiet = args.quiet
@@ -195,6 +194,7 @@ timebins = args.bin
 clean = args.clean
 sub = args.sub
 cutoutsize = args.cut
+noalign = args.noalign
 tmpl_sat = args.tmpl_sat
 sci_sat = args.sci_sat
 keep = args.keep
@@ -251,28 +251,6 @@ def PS1catalog(ra,dec,magmin=25,magmax=8):
     if len(results['data']) > 1:
     
         data = np.array(results['data'])
-
-#        # Get rid of non-detections:
-#        data = data[data[:,2]>-999]
-#        data = data[data[:,3]>-999]
-#        data = data[data[:,4]>-999]
-#        data = data[data[:,5]>-999]
-#        data = data[data[:,6]>-999]
-#
-#        # Get rid of very faint stars
-#        data = data[data[:,2]<magmin]
-#        data = data[data[:,3]<magmin]
-#        data = data[data[:,4]<magmin]
-#        data = data[data[:,5]<magmin]
-#        data = data[data[:,6]<magmin]
-#
-#        # Get rid of stars likely to saturate
-#        data = data[data[:,2]>magmax]
-#        data = data[data[:,3]>magmax]
-#        data = data[data[:,4]>magmax]
-#        data = data[data[:,5]>magmax]
-#        data = data[data[:,6]>magmax]
-
 
         # Star-galaxy separation: star if PSFmag - KronMag < 0.1
         data = data[:,:-1][data[:,4]-data[:,-1]<0.1]
@@ -391,26 +369,6 @@ def SDSScatalog(ra,dec,magmin=25,magmax=8):
     
     data = data[data['type'] == 6]
 
-#    # Get rid of non-detections:
-#    data = data[data['u']>-9999]
-#    data = data[data['g']>-9999]
-#    data = data[data['r']>-9999]
-#    data = data[data['i']>-9999]
-#    data = data[data['z']>-9999]
-#
-#    # Get rid of very faint stars
-#    data = data[data['u']<magmin]
-#    data = data[data['g']<magmin]
-#    data = data[data['r']<magmin]
-#    data = data[data['i']<magmin]
-#    data = data[data['z']<magmin]
-#
-#    # Get rid of stars likely to saturate
-#    data = data[data['u']>magmax]
-#    data = data[data['g']>magmax]
-#    data = data[data['r']>magmax]
-#    data = data[data['i']>magmax]
-#    data = data[data['z']>magmax]
     
     # NEED TO REMOVE DUPLICATES
 
@@ -471,7 +429,7 @@ if not os.path.exists(outdir): os.makedirs(outdir)
 # A file to write final magnitudes
 results_filename = os.path.join(outdir,'PSF_phot_'+str(int(time.time()))+'.txt')
 outFile = open(results_filename,'w')
-outFile.write('#image\ttarget\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tLimit\tZP\terr\ttemplate\tcomments')
+outFile.write('#image\ttarget\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tap_limit\tdet_limit\tZP\terr\ttemplate\tcomments')
 
 
 
@@ -1263,6 +1221,11 @@ for f in usedfilters:
 
         photTab_opt = photutils.aperture_photometry(data, photaps_opt, error=err_array)
 
+        detected = (photTab_opt['aperture_sum']>3*photTab_opt['aperture_sum_err'])
+
+        faintest_object = max(seqMags[f][mag_range][inframe][goodpix][found][detected])
+
+
         print('Done')
 
 
@@ -1295,15 +1258,11 @@ for f in usedfilters:
 
         goodStars = (photTab['aperture_sum']>5*photTab['aperture_sum_err'])
 
-        ax1.errorbar(co[:,0][~goodStars],co[:,1][~goodStars],fmt='x',mfc='none',
-                    markeredgewidth=2, color='C1',
-                    markersize=8,label='Too faint')
+        ax1.errorbar(co[:,0][goodStars],co[:,1][goodStars], fmt='s',mfc='none', markeredgecolor='midnightblue',markersize=8,markeredgewidth=2.5,label='SNR>5')
 
-#        goodStars = np.ones(len(photTab)).astype(bool)
 
         ax1.legend(frameon=True,fontsize=16)
 
-#        ax1.text(len(data[:,0])*0.8,len(data[:,1])*0.9,'Rejected',color='C1')
 
         print('Done')
 
@@ -1314,18 +1273,13 @@ for f in usedfilters:
         if f in seqMags:
         
             magmax2 = magmax
-            magmin2 = magmin
+            magmin2 = max(seqMags[f][mag_range][inframe][goodpix][found][goodStars])
             
             happy = 'n'
             while happy not in ('y','yes'):
             
-                mag_range_2 = (seqMags[f][mag_range][inframe][goodpix][found][goodStars]>magmax2) & (seqMags[f][mag_range][inframe][goodpix][found][goodStars]<magmin2)
+                mag_range_2 = (seqMags[f][mag_range][inframe][goodpix][found][goodStars]>=magmax2) & (seqMags[f][mag_range][inframe][goodpix][found][goodStars]<=magmin2)
             
-                if zpmethod == 'psf':
-                    flux = np.array(psfphotTab['flux_fit'])[goodStars]
-                else:
-                    flux = np.array(photTab['aperture_sum'])[goodStars]
-                    
                 
                 # PSF zeropoint
                 flux = np.array(psfphotTab['flux_fit'])[goodStars]
@@ -1347,7 +1301,6 @@ for f in usedfilters:
                 if len(seqIm) > 10:
                     checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < errzp1*sigClip
                 else:
-#                    checkMags = np.ones(len(seqIm)).astype(bool)
                     checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < 0.5
 
 #                if False in checkMags:
@@ -1371,11 +1324,11 @@ for f in usedfilters:
                 ZP_psf = np.median(zpList)
                 errZP_psf = np.std(zpList)#/np.sqrt(len(zpList))
 
-                axZP.scatter(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags], zpList,color='k')
+                axZP.scatter(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags], zpList,color='k',label='psf')
 
-                axZP.axhline(ZP,linestyle='-',color='C0')
-                axZP.axhline(ZP-errZP,linestyle='--',color='C0')
-                axZP.axhline(ZP+errZP,linestyle='--',color='C0')
+                axZP.axhline(ZP,linestyle='-',color='k')
+                axZP.axhline(ZP-errZP,linestyle='--',color='k')
+                axZP.axhline(ZP+errZP,linestyle='--',color='k')
 
                 axZP.set_xlabel('Magnitude')
                 axZP.set_title('Zero point')
@@ -1398,7 +1351,6 @@ for f in usedfilters:
                 if len(seqIm) > 10:
                     checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < errzp1*sigClip
                 else:
-    #                    checkMags = np.ones(len(seqIm)).astype(bool)
                     checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < 0.5
 
     #                if False in checkMags:
@@ -1414,6 +1366,14 @@ for f in usedfilters:
                 errZP_opt = np.std(zpList)#/np.sqrt(len(zpList))
 
 
+                axZP.scatter(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags], zpList,color='C0',marker='x',label='aperture')
+
+                axZP.axhline(ZP_opt,linestyle='-',color='C0')
+                axZP.axhline(ZP_opt-errZP_opt,linestyle='--',color='C0')
+                axZP.axhline(ZP_opt+errZP_opt,linestyle='--',color='C0')
+
+                axZP.legend(loc='lower left',fontsize=16,frameon=True, ncol=2,columnspacing=0.6,handletextpad=-0.2)
+
                 # big aperture ZP
                 flux = np.array(photTab['aperture_sum'])[goodStars]
                 
@@ -1427,7 +1387,6 @@ for f in usedfilters:
                 if len(seqIm) > 10:
                     checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < errzp1*sigClip
                 else:
-    #                    checkMags = np.ones(len(seqIm)).astype(bool)
                     checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < 0.5
 
     #                if False in checkMags:
@@ -1485,66 +1444,65 @@ for f in usedfilters:
   
             print('\nAligning template image and building template PSF')
 
-            tmp = fits.open(template)
-
-            try:
-                tmp[0].verify('fix')
-
-                data2 = tmp[0].data
-                header2 = tmp[0].header
-                checkdat2 = len(data2)
+            if noalign == True:
+                im2 = fits.open(template)
                 
-                tmp = tmp[0]
+            else:
+                tmp = fits.open(template)
 
-            except:
-                tmp[1].verify('fix')
+                try:
+                    tmp[0].verify('fix')
 
-                data2 = tmp[1].data
-                header2 = tmp[1].header
+                    data2 = tmp[0].data
+                    header2 = tmp[0].header
+                    checkdat2 = len(data2)
+                    
+                    tmp = tmp[0]
+
+                except:
+                    tmp[1].verify('fix')
+
+                    data2 = tmp[1].data
+                    header2 = tmp[1].header
+                    
+                    tmp = tmp[1]
+
+
+
+
+                ### Using Astroalign
+
+                try:
+                    im_fixed = np.array(data, dtype="<f4")
+                    tmp_fixed = np.array(data2, dtype="<f4")
+
+                    registered, footprint = aa.register(tmp_fixed, im_fixed)
+
+                    tmp_masked = np.ma.masked_array(registered, footprint, fill_value=np.nanmedian(tmp_fixed)).filled()
+
+                    tmp_masked[np.isnan(tmp_masked)] = np.nanmedian(tmp_fixed)
+
+                    hdu2 = fits.PrimaryHDU(tmp_masked)
+
+                    hdu2.writeto('tmpl_aligned.fits',overwrite=True)
+        
+                except:
                 
-                tmp = tmp[1]
+                    print('Astroalign failed to match images, trying Reproject')
+                
+                ### Using Reproject
+
+                    tmp_resampled, footprint = reproject_interp(tmp, header)
+
+                    tmp_resampled[np.isnan(tmp_resampled)] = np.nanmedian(tmp_resampled)
+
+                    hdu2 = fits.PrimaryHDU(tmp_resampled)
+
+                    hdu2.writeto('tmpl_aligned.fits',overwrite=True)
 
 
+                im2 = fits.open('tmpl_aligned.fits')
 
-
-            ### Using Astroalign
-
-            try:
-                im_fixed = np.array(data, dtype="<f4")
-                tmp_fixed = np.array(data2, dtype="<f4")
-
-                registered, footprint = aa.register(tmp_fixed, im_fixed)
-
-                tmp_masked = np.ma.masked_array(registered, footprint, fill_value=np.nanmedian(tmp_fixed)).filled()
-
-                tmp_masked[np.isnan(tmp_masked)] = np.nanmedian(tmp_fixed)
-
-                hdu2 = fits.PrimaryHDU(tmp_masked)
-
-                hdu2.writeto('tmpl_aligned.fits',overwrite=True)
-    
-            except:
-            
-                print('Astroalign failed to match images, trying Reproject')
-            
-            ### Using Reproject
-
-                tmp_resampled, footprint = reproject_interp(tmp, header)
-
-                tmp_resampled[np.isnan(tmp_resampled)] = np.nanmedian(tmp_resampled)
-
-                hdu2 = fits.PrimaryHDU(tmp_resampled)
-
-                hdu2.writeto('tmpl_aligned.fits',overwrite=True)
-
-
-
-            fig2 = plt.figure(2,(14,7))
-            plt.clf()
-            plt.ion()
-            plt.show()
-
-            im2 = fits.open('tmpl_aligned.fits')
 
             try:
                 im2[0].verify('fix')
@@ -1579,6 +1537,11 @@ for f in usedfilters:
                 bkg_error2 = np.array([i.astype(float) for i in bkg_error2_adu])
                 err_array2 = calc_total_error(data2, bkg_error2, gain2)
 
+            
+            fig2 = plt.figure(2,(14,7))
+            plt.clf()
+            plt.ion()
+            plt.show()
 
             plt.subplots_adjust(left=0.05,right=0.99,top=0.99,bottom=-0.05)
 
@@ -1779,8 +1742,8 @@ for f in usedfilters:
             
             
             cutoutsize_new = cutoutsize
-            if f == 'u':
-                cutoutsize_new *= 2
+            if f == 'u' and cutoutsize < 1600:
+                cutoutsize_new = 1600
             sci_sat_new = sci_sat
             tmpl_sat_new = tmpl_sat
 
@@ -2102,19 +2065,19 @@ for f in usedfilters:
 
         SNap = -2.5*np.log10(SNphotTab['aperture_sum_sub'])
         # aperture mag error assuming Poisson noise
-        errSNap = 0.92*abs(SNphotTab['aperture_sum_err_1'] / SNphotTab['aperture_sum_sub'])
+        errSNap = abs(SNphotTab['aperture_sum_err_1'] / SNphotTab['aperture_sum_sub'])
 
         SNap_opt = -2.5*np.log10(SNphotTab['aperture_opt_sum_sub'])
         SNap_opt_corr = -2.5*np.log10(SNphotTab['aperture_opt_sum_sub']) + ap_corr
         # aperture mag error assuming Poisson noise
-        errSNap_opt = 0.92*abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub'])
-        errSNap_opt_corr = np.sqrt((0.92*abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub']))**2 + (0.1*ap_corr)**2)
+        errSNap_opt = abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub'])
+        errSNap_opt_corr = np.sqrt((abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub']))**2 + (0.1*ap_corr)**2)
 
         ulim = -2.5*np.log10(3*np.sqrt(sigsky) * photap[0].area)
 
         try:
             SNpsf = -2.5*np.log10(SNpsfphotTab['flux_fit'])
-            errSNpsf = 0.92*abs(SNpsfphotTab['flux_unc']/SNpsfphotTab['flux_fit'])
+            errSNpsf = abs(SNpsfphotTab['flux_unc']/SNpsfphotTab['flux_fit'])
         except:
             SNpsf = np.nan
             errSNpsf = np.nan
@@ -2174,7 +2137,7 @@ for f in usedfilters:
         if comment1:
             comment += (' // '+comment1)
 
-        outFile.write('\n'+image+'\t%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP,errZP,template,comment))
+        outFile.write('\n'+image+'\t%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,faintest_object,ZP,errZP,template,comment))
 #        outFile.write(comment)
 
 
