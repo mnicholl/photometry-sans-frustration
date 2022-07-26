@@ -593,6 +593,8 @@ filtertab = np.array(filtertab)
 for f in usedfilters:
 
     print('\n\n#########\n'+f+'-band\n#########')
+    
+    filtertab2 = []
 
     ims1 = filtertab[filtertab[:,1]==f]
     
@@ -771,6 +773,11 @@ for f in usedfilters:
                         ims2.append('stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits')
                         
                         print('Stack done: ' + str(np.round(mjdstack,2)))
+                        
+                        if sub == True and has_template == True:
+                            filtertab2.append(['stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits', filtername, mjdstack, template])
+                        else:
+                            filtertab2.append(['stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits', filtername, mjdstack, ''])
 
                     except:
                         print('Alignment/stacking failed in bin, using single images')
@@ -810,9 +817,11 @@ for f in usedfilters:
             try:
                 mjd = filtertab[:,2][filtertab[:,0]==image][0]
             except:
-                mjd = fits.getval(image,keyword='MJD')
-            finally:
-                mjd = np.nan
+                try:
+                    mjd = filtertab2[:,2][filtertab2[:,0]==image][0]
+                except:
+                    mjd = fits.getval(image,keyword='MJD')
+
 
             mjd = float(mjd)
 
