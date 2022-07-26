@@ -786,7 +786,8 @@ for f in usedfilters:
                             already_clean = False
                             
                 elif len(stacktab[:,0]) == 1:
-                    ims2.append(stacktab[0])
+                    print('Only one image in bin')
+                    ims2.append(stacktab[0][0])
                     already_clean = False
                     
                 else:
