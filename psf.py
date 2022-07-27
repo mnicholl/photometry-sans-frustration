@@ -410,10 +410,11 @@ def SDSScatalog(ra,dec,magmin=25,magmax=8):
 # Try to match header keyword to a known filter automatically:
 
 filtSyn = {'u':['u','SDSS-U','up','up1','U640','F336W','Sloan_u','u_Sloan'],
-           'g':['g','SDSS-G','gp','gp1','g782','F475W','g.00000','Sloan_g','g_Sloan'],
-           'r':['r','SDSS-R','rp','rp1','r784','F625W','r.00000','Sloan_r','r_Sloan'],
-           'i':['i','SDSS-I','ip','ip1','i705','F775W','i.00000','Sloan_i','i_Sloan'],
-           'z':['z','SDSS-Z','zp','zp1','z623','zs', 'F850LP','z.00000','Sloan_z','z_Sloan'],
+           'g':['g','SDSS-G','gp','gp1','g782','F475W','g.00000','Sloan_g','g_Sloan','g DECam SDSS c0001 4720.0 1520.0'],
+           'r':['r','SDSS-R','rp','rp1','r784','F625W','r.00000','Sloan_r','r_Sloan','r DECam SDSS c0002 6415.0 1480.0'],
+           'i':['i','SDSS-I','ip','ip1','i705','F775W','i.00000','Sloan_i','i_Sloan','i DECam SDSS c0003 7835.0 1470.0'],
+           'z':['z','SDSS-Z','zp','zp1','z623','zs', 'F850LP','z.00000','Sloan_z','z_Sloan','z DECam SDSS c0004 9260.0 1520.0'],
+           'y':['yp1','Y DECam c0005 10095.0 1130.0'],
            'J':['J'],
            'H':['H'],
            'K':['K','Ks'],
@@ -425,7 +426,7 @@ filtSyn = {'u':['u','SDSS-U','up','up1','U640','F336W','Sloan_u','u_Sloan'],
 
 # UPDATE WITH QUIRKS OF MORE TELESCOPES...
 
-filtAll = 'u,g,r,i,z,U,B,V,R,I,J,H,K'
+filtAll = 'u,g,r,i,z,y,U,B,V,R,I,J,H,K'
 
 
 
@@ -558,7 +559,7 @@ for image in ims:
                 template = '../../template_'+filtername+'.fits'
             else:
                 print('No template found locally...')
-                if filtername in ('g','r','i','z'):
+                if filtername in ('g','r','i','z','y'):
                     try:
                         template = PS1cutouts(RAdec[0],RAdec[1],filtername)
                     except:
@@ -752,9 +753,9 @@ for f in usedfilters:
                             if clean == True:
                                 print('Cleaning cosmics')
                                 clean_source, mask = lacosmic(fits.getdata(im1))
-                                registered, footprint = aa.register(clean_source, clean_zero, fill_value=np.nan)
+                                registered, footprint = aa.register(np.array(clean_source, dtype="<f4"), np.array(clean_zero, dtype="<f4"), fill_value=np.nan)
                             else:
-                                registered, footprint = aa.register(fits.getdata(im1), fits.getdata(zero_shift_image), fill_value=np.nan)
+                                registered, footprint = aa.register(np.array(fits.getdata(im1), dtype="<f4"), np.array(fits.getdata(zero_shift_image), dtype="<f4"), fill_value=np.nan)
 
                             shifted_data[im1] = registered
 
@@ -1301,7 +1302,7 @@ for f in usedfilters:
                 happy = 'n'
                 while happy not in ('y','yes'):
 
-                    if magmin2 < magmax2:
+                    if magmin2 <= magmax2:
                         print('error: magmin brighter than magmax - resetting to defaults')
                         magmin2 = 22
                         magmax2 = 16.5
@@ -2172,7 +2173,7 @@ for f in usedfilters:
             if comment1:
                 comment += (' // '+comment1)
 
-            outFile.write('\n'+image+'\t%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,faintest_object,ZP,errZP,template,comment))
+            outFile.write('\n'+image+'\t%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,calMagLim,ZP,errZP,template,comment))
 
         except Exception as e:
             exc_type, exc_obj, exc_tb = sys.exc_info()
