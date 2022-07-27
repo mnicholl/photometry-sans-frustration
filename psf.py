@@ -1600,8 +1600,11 @@ for f in usedfilters:
 
                 co2 = co.copy()
 
-                co2[:,0],co2[:,1] = photutils.centroids.centroid_sources(data2,co2[:,0],co2[:,1],
+                try:
+                    co2[:,0],co2[:,1] = photutils.centroids.centroid_sources(data2,co2[:,0],co2[:,1],
                                             centroid_func=photutils.centroids.centroid_2dg)
+                except:
+                    pass
 
                 psfinput2 = astropy.table.Table()
                 psfinput2['x'] = co2[:,0]
