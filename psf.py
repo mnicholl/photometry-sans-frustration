@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-version = '1.4'
+version = '1.5'
 
 '''
     PSF: PHOTOMETRY SANS FRUSTRATION
@@ -122,7 +122,7 @@ parser.add_argument('--bands','-b', dest='bands', default='', nargs='+',
 parser.add_argument('--coords','-c', dest='coords', default=[None,None], nargs=2, type=float,
                     help='Coordinates of target')
 
-parser.add_argument('--magmin', dest='magmin', default=22, type=float,
+parser.add_argument('--magmin', dest='magmin', default=25, type=float,
                     help='Faintest sequence stars to use (stars below 3 sigma will be removed anyway)')
 
 parser.add_argument('--magmax', dest='magmax', default=16, type=float,
@@ -198,7 +198,7 @@ magmax = args.magmax
 
 if magmin < magmax:
     print('error: magmin brighter than magmax - resetting to defaults')
-    magmin = 22
+    magmin = 25
     magmax = 16
 
 shifts = args.shifts
@@ -697,29 +697,32 @@ for f in usedfilters:
 
     zero_shift_image = ''
     
-    dostack = 'n'
+    dostack = False
+    
+    use_existing = 'y'
     
     ims2 = ims1[:,0].copy()
 
     if stack==True:
-        dostack = 'y'
+        dostack = True
+        existing_stacks = glob.glob('stack*_'+f+'.fits')
         if len(ims1[:,0]) < 2:
             print('\nOnly 1 image in filter, skipping stacking!')
-            dostack = 'n'
-        elif len(glob.glob('stack*_'+f+'.fits')) > 0:
+            dostack = False
+        elif len(existing_stacks) > 0:
             print('Already exists:')
-            print(glob.glob('stack*_'+f+'.fits'))
+            print(existing_stacks)
             if not quiet:
-                use_existing = input('\nStack(s) already found in filter, use existing? \n (Note this will ignore unstacked data!) [y]')
+                use_existing = input('\nStack(s) already found in filter, use existing where possible? [y]')
                 if not use_existing: use_existing = 'y'
-                if use_existing == 'y':
-                    dostack = 'n'
-                    ims2 = glob.glob('stack*_'+f+'.fits')
-            else:
-                dostack = 'n'
+#                if use_existing == 'y':
+#                    dostack = False
+#                    ims2 = glob.glob('stack*_'+f+'.fits')
+#            else:
+#                dostack = False
 
 
-        if dostack in ('y','yes'):
+        if dostack == True:
             ims2 = []
             print('\nAligning and stacking images...')
             mintime = np.min(filtertab[:,2][filtertab[:,1]==f].astype(float))
@@ -736,78 +739,95 @@ for f in usedfilters:
             for bin in range(len(binedges)-1):
                 time_in_range = (ims1[:,2].astype(float)>=binedges[bin])&(ims1[:,2].astype(float)<binedges[bin+1])
                 stacktab = ims1[time_in_range]
-                if len(stacktab) > 1:
-                    try:
-                        mjdstack = np.mean(stacktab[:,2].astype(float))
-
-                        zero_shift_image = stacktab[:,0][0]
-                        
-            #            imshifts = {} # dictionary to hold the x and y shift pairs for each image
-            #            for im1 in ims1[:,0]:
-            #                ## phase_cross_correlation is a function that calculates shifts by comparing 2-D arrays
-            #                imshift, imshifterr, diffphase = phase_cross_correlation(
-            #                    fits.getdata(zero_shift_image),
-            #                    fits.getdata(im1))
-            #                imshifts[im1] = imshift
-            #
-            #            ## new dictionary for shifted image data:
-            #            shifted_data = {}
-            #            for im1 in imshifts:
-            #                shifted_data[im1] = interp.shift(
-            #                    fits.getdata(im1),
-            #                    imshifts[im1])
-            #                shifted_data[im1][shifted_data[im1] == 0] = 'nan'
-
-                        if clean == True:
-                            clean_zero, mask = lacosmic(fits.getdata(zero_shift_image))
-                            already_clean = True
-
-                        shifted_data = {}
-                        for im1 in stacktab[:,0]:
-                            if clean == True:
-                                print('Cleaning cosmics')
-                                clean_source, mask = lacosmic(fits.getdata(im1))
-                                registered, footprint = aa.register(np.array(clean_source, dtype="<f4"), np.array(clean_zero, dtype="<f4"), fill_value=np.nan)
-                            else:
-                                registered, footprint = aa.register(np.array(fits.getdata(im1), dtype="<f4"), np.array(fits.getdata(zero_shift_image), dtype="<f4"), fill_value=np.nan)
-
-                            shifted_data[im1] = registered
-
-                        shifted_data_cube = np.stack([shifted_data[im1] for im1 in stacktab[:,0]])
-                        stacked_data = np.nanmedian(shifted_data_cube, axis=0)
-                        
-                        stackheader = fits.getheader(zero_shift_image)
-                        
-                        stackheader['MJD'] = mjdstack
-                        stackheader['MJD-OBS'] = mjdstack
-
-                        fits.writeto('stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits',
-                                stacked_data,header=stackheader,
-                                overwrite=True)
-                        
-                        ims2.append('stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits')
-                        
-                        print('Stack done: ' + str(np.round(mjdstack,2)))
-                        
-                        if sub == True and has_template == True:
-                            filtertab2.append(['stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits', filtername, mjdstack, template])
-                        else:
-                            filtertab2.append(['stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits', filtername, mjdstack, ''])
-
-                    except:
-                        print('Alignment/stacking failed in bin, using single images')
-                        for single_im in stacktab[:,0]:
-                            ims2.append(single_im)
-                            already_clean = False
+                if len(stacktab) > 0:
+                    go_on = False
+                    if use_existing in ('y','yes'):
+                        for prev_stack in existing_stacks:
+                            if prev_stack in stacktab:
+                                go_on = True
+                                print('using existing stack: '+prev_stack)
+                                ims2.append(prev_stack)
+                                if sub == True and has_template == True:
+                                    filtertab2.append([prev_stack, filtername, filtertab[:,2][filtertab[:,0]==prev_stack][0], template])
+                                else:
+                                    filtertab2.append([prev_stack, filtername, filtertab[:,2][filtertab[:,0]==prev_stack][0], ''])
+                                continue
+                        if go_on == True:
+                            continue
+                                
+                    stacktab2 = []
+                    for row in stacktab:
+                        if row[0] not in existing_stacks:
+                            stacktab2.append(row)
                             
-                elif len(stacktab[:,0]) == 1:
-                    print('Only one image in bin')
-                    ims2.append(stacktab[0][0])
-                    already_clean = False
-                    
-                else:
-                    pass
-                
+                    stacktab = np.array(stacktab2)
+
+                    if len(stacktab) > 1:
+                        try:
+                            mjdstack = np.mean(stacktab[:,2].astype(float))
+
+                            zero_shift_image = stacktab[:,0][0]
+                            
+                            if clean == True:
+                                clean_zero, mask = lacosmic(fits.getdata(zero_shift_image))
+                                already_clean = True
+
+                            shifted_data = {}
+                            for im1 in stacktab[:,0]:
+                                print(im1)
+                                if clean == True:
+                                    print('Cleaning cosmics')
+                                    clean_source, mask = lacosmic(fits.getdata(im1))
+                                    registered, footprint = aa.register(np.array(clean_source, dtype="<f4"), np.array(clean_zero, dtype="<f4"), fill_value=np.nan)
+                                else:
+                                    registered, footprint = aa.register(np.array(fits.getdata(im1), dtype="<f4"), np.array(fits.getdata(zero_shift_image), dtype="<f4"), fill_value=np.nan)
+
+                                shifted_data[im1] = registered
+
+                            shifted_data_cube = np.stack([shifted_data[im1] for im1 in stacktab[:,0]])
+                            stacked_data = np.nanmedian(shifted_data_cube, axis=0)
+                            
+                            stackheader = fits.getheader(zero_shift_image)
+                            
+                            stackheader['MJD'] = mjdstack
+                            stackheader['MJD-OBS'] = mjdstack
+
+                            fits.writeto('stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits',
+                                    stacked_data,header=stackheader,
+                                    overwrite=True)
+                            
+                            ims2.append('stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits')
+                            
+                            print('Stack done: ' + str(np.round(mjdstack,2)))
+                            
+                            if sub == True and has_template == True:
+                                filtertab2.append(['stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits', filtername, mjdstack, template])
+                            else:
+                                filtertab2.append(['stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits', filtername, mjdstack, ''])
+
+                        except:
+                            print('Alignment/stacking failed in bin, using single images')
+                            for single_im in stacktab[:,0]:
+                                ims2.append(single_im)
+                                already_clean = False
+                                if sub == True and has_template == True:
+                                    filtertab2.append([single_im, filtername, filtertab[:,2][filtertab[:,0]==single_im][0], template])
+                                else:
+                                    filtertab2.append([single_im, filtername, filtertab[:,2][filtertab[:,0]==single_im][0], ''])
+
+                    elif len(stacktab[:,0]) == 1:
+                        print('Only one image in bin')
+                        ims2.append(stacktab[0][0])
+                        already_clean = False
+                        if sub == True and has_template == True:
+                            filtertab2.append([stacktab[0][0], filtername, filtertab[:,2][filtertab[:,0]==stacktab[0][0]][0], template])
+                        else:
+                            filtertab2.append([stacktab[0][0], filtername, filtertab[:,2][filtertab[:,0]==stacktab[0][0]][0], ''])
+
+                    else:
+                        pass
+    
+    filtertab2 = np.array(filtertab2)
     
 #################################
 # Part four: do some photometry
@@ -826,17 +846,19 @@ for f in usedfilters:
         
             plt.clf()
 
+            print('\n##########################################')
             print('\n> Image: '+image+'  (number %d of %d in filter)' %(counter,len(ims2)))
             
             counter += 1
 
-            try:
+            if dostack == True:
+                mjd = filtertab2[:,2][filtertab2[:,0]==image][0]
+                if sub == True:
+                    template = filtertab2[:,3][filtertab2[:,0]==image][0]
+            else:
                 mjd = filtertab[:,2][filtertab[:,0]==image][0]
-            except:
-                try:
-                    mjd = filtertab2[:,2][filtertab2[:,0]==image][0]
-                except:
-                    mjd = fits.getval(image,keyword='MJD')
+                if sub == True:
+                    template = filtertab[:,3][filtertab[:,0]==image][0]
 
 
             mjd = float(mjd)
@@ -1324,7 +1346,7 @@ for f in usedfilters:
 
                     if magmin2 <= magmax2:
                         print('error: magmin brighter than magmax - resetting to defaults')
-                        magmin2 = 22
+                        magmin2 = 25
                         magmax2 = 16
 
                     mag_range_2 = (seqMags[f][mag_range][inframe][goodpix][found][goodStars]>=magmax2) & (seqMags[f][mag_range][inframe][goodpix][found][goodStars]<=magmin2)
@@ -1382,8 +1404,8 @@ for f in usedfilters:
                     axZP.set_xlabel('Magnitude')
                     axZP.set_title('Zero point')
                     
-                    axZP.set_ylim(max(max(zpList1)+0.5,ZP+1),min(min(zpList1)-0.5,ZP-1))
-                    axZP.set_xlim(magmax2,magmin2)
+                    axZP.set_ylim(max(max(zpList)+0.5,ZP+1),min(min(zpList)-0.5,ZP-1))
+                    axZP.set_xlim(min(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags])-0.2, max(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags])+0.2)
                     
                     plt.draw()
      
