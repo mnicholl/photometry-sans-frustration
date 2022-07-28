@@ -93,7 +93,7 @@ import time
  
  
 def handler(signum, frame):
-    res = input('\n > Paused. Do you want (c)ontinue, (q)uit, or (s)kip image? ')
+    res = input('\n > Paused. Do you want (c)ontinue, (q)uit and save, or (s)kip image? ')
     if res == 's':
         raise Exception
     if res == 'q':
