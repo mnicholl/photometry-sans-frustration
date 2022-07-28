@@ -88,6 +88,20 @@ from photutils.utils import calc_total_error
 from photutils.psf import IntegratedGaussianPRF
 from ccdproc import cosmicray_lacosmic as lacosmic
 import warnings
+import signal
+import time
+ 
+ 
+def handler(signum, frame):
+    res = input('\n > Paused. Do you want (c)ontinue, (q)uit, or (s)kip image? ')
+    if res == 's':
+        raise Exception
+    if res == 'q':
+        print('\nQuitting and saving results')
+        outFile.close()
+        sys.exit(0)
+
+signal.signal(signal.SIGINT, handler)
 
 
 warnings.filterwarnings("ignore")
@@ -108,7 +122,7 @@ parser.add_argument('--bands','-b', dest='bands', default='', nargs='+',
 parser.add_argument('--coords','-c', dest='coords', default=[None,None], nargs=2, type=float,
                     help='Coordinates of target')
 
-parser.add_argument('--magmin', dest='magmin', default=20, type=float,
+parser.add_argument('--magmin', dest='magmin', default=22, type=float,
                     help='Faintest sequence stars to use (stars below 3 sigma will be removed anyway)')
 
 parser.add_argument('--magmax', dest='magmax', default=16, type=float,
@@ -185,7 +199,7 @@ magmax = args.magmax
 if magmin < magmax:
     print('error: magmin brighter than magmax - resetting to defaults')
     magmin = 22
-    magmax = 16.5
+    magmax = 16
 
 shifts = args.shifts
 aprad = args.aprad
@@ -1279,9 +1293,15 @@ for f in usedfilters:
                         vmin=visualization.ZScaleInterval().get_limits(data)[0],
                         vmax=visualization.ZScaleInterval().get_limits(data)[1])
 
-            goodStars = (photTab['aperture_sum']>5*photTab['aperture_sum_err'])
+            goodStars = (photTab['aperture_sum']>10*photTab['aperture_sum_err'])
+            
+            seq_SNR = 10
+            
+            if len(goodStars[goodStars]) < 10:
+                goodStars = (photTab['aperture_sum']>5*photTab['aperture_sum_err'])
+                seq_SNR = 5
 
-            ax1.errorbar(co[:,0][goodStars],co[:,1][goodStars], fmt='s',mfc='none', markeredgecolor='midnightblue',markersize=8,markeredgewidth=2.5,label='SNR>5')
+            ax1.errorbar(co[:,0][goodStars],co[:,1][goodStars], fmt='s',mfc='none', markeredgecolor='midnightblue',markersize=8,markeredgewidth=2.5,label='SNR>'+str(seq_SNR))
 
 
             ax1.legend(frameon=True,fontsize=16,loc='upper left')
@@ -1305,7 +1325,7 @@ for f in usedfilters:
                     if magmin2 <= magmax2:
                         print('error: magmin brighter than magmax - resetting to defaults')
                         magmin2 = 22
-                        magmax2 = 16.5
+                        magmax2 = 16
 
                     mag_range_2 = (seqMags[f][mag_range][inframe][goodpix][found][goodStars]>=magmax2) & (seqMags[f][mag_range][inframe][goodpix][found][goodStars]<=magmin2)
                 
@@ -2177,7 +2197,7 @@ for f in usedfilters:
 
         except Exception as e:
             exc_type, exc_obj, exc_tb = sys.exc_info()
-            print('Error encountered (skipping): image '+image)
+            print('Error or ctrl-c encountered: skipping image '+image)
             print(e)
             print('Line number:')
             print(exc_tb.tb_lineno)
