@@ -122,7 +122,7 @@ parser.add_argument('--bands','-b', dest='bands', default='', nargs='+',
 parser.add_argument('--coords','-c', dest='coords', default=[None,None], nargs=2, type=float,
                     help='Coordinates of target')
 
-parser.add_argument('--magmin', dest='magmin', default=22, type=float,
+parser.add_argument('--magmin', dest='magmin', default=20, type=float,
                     help='Faintest sequence stars to use (stars below 3 sigma will be removed anyway)')
 
 parser.add_argument('--magmax', dest='magmax', default=16, type=float,
@@ -198,7 +198,7 @@ magmax = args.magmax
 
 if magmin < magmax:
     print('error: magmin brighter than magmax - resetting to defaults')
-    magmin = 22
+    magmin = 20
     magmax = 16
 
 shifts = args.shifts
@@ -840,12 +840,9 @@ for f in usedfilters:
     for image in ims2:
     
         try:
-                
-            # PSF parameters that can be changed each time
+            
             stamprad = stamprad0
-            psfthresh = psfthresh0
-            samp = samp0
-        
+
             plt.clf()
 
             print('\n##########################################')
@@ -1061,6 +1058,11 @@ for f in usedfilters:
                 goodStars = (photTab['aperture_sum']>5*photTab['aperture_sum_err'])
                 seq_SNR = 5
 
+            # BasicPSFphotometry seems to go crazy if >~ 50 stars
+            while len(goodStars[goodStars]) > 30:
+                seq_SNR += 5
+                goodStars = (photTab['aperture_sum']>seq_SNR*photTab['aperture_sum_err'])
+
 
             # PSF Photometry
             print('\nBuilding PSF...')
@@ -1070,6 +1072,10 @@ for f in usedfilters:
             psfinput = astropy.table.Table()
             psfinput['x'] = co[:,0]
             psfinput['y'] = co[:,1]
+
+
+            psfthresh = max(psfthresh0,seq_SNR)
+            samp = samp0
 
 
             # Create model from sequence stars
@@ -1421,11 +1427,11 @@ for f in usedfilters:
                     errZP_opt = np.std(zpList)#/np.sqrt(len(zpList))
 
 
-                    axZP.scatter(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags], zpList,color='C0',marker='x',label='aperture')
+                    axZP.scatter(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags], zpList,color='gold',marker='x',label='aperture')
 
-                    axZP.axhline(ZP_opt,linestyle='-',color='C0')
-                    axZP.axhline(ZP_opt-errZP_opt,linestyle='--',color='C0')
-                    axZP.axhline(ZP_opt+errZP_opt,linestyle='--',color='C0')
+                    axZP.axhline(ZP_opt,linestyle='-',color='gold')
+                    axZP.axhline(ZP_opt-errZP_opt,linestyle='--',color='gold')
+                    axZP.axhline(ZP_opt+errZP_opt,linestyle='--',color='gold')
 
                     axZP.legend(loc='lower left',fontsize=16,frameon=True, ncol=2,columnspacing=0.6,handletextpad=-0.2)
 
@@ -1655,7 +1661,7 @@ for f in usedfilters:
                 print('\nBuilding template image PSF for subtraction')
 
                 stamprad2 = stamprad
-                psfthresh2 = psfthresh0
+                psfthresh2 = max(psfthresh0,50)
                 samp2 = samp
 
                 # Create model from sequence stars
