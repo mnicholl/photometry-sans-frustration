@@ -89,7 +89,7 @@ from photutils.psf import IntegratedGaussianPRF
 from ccdproc import cosmicray_lacosmic as lacosmic
 import warnings
 import signal
-import time
+import wget
  
  
 def handler(signum, frame):
@@ -122,7 +122,7 @@ parser.add_argument('--bands','-b', dest='bands', default='', nargs='+',
 parser.add_argument('--coords','-c', dest='coords', default=[None,None], nargs=2, type=float,
                     help='Coordinates of target')
 
-parser.add_argument('--magmin', dest='magmin', default=25, type=float,
+parser.add_argument('--magmin', dest='magmin', default=22, type=float,
                     help='Faintest sequence stars to use (stars below 3 sigma will be removed anyway)')
 
 parser.add_argument('--magmax', dest='magmax', default=16, type=float,
@@ -198,7 +198,7 @@ magmax = args.magmax
 
 if magmin < magmax:
     print('error: magmin brighter than magmax - resetting to defaults')
-    magmin = 25
+    magmin = 22
     magmax = 16
 
 shifts = args.shifts
@@ -337,10 +337,12 @@ def PS1cutouts(ra,dec,filt):
         cutout_url += '&red='+image_name
 
         dest_file = 'template_'+filt+'.fits'
-
-        cmd = 'wget -O %s "%s"' % (dest_file, cutout_url)
-
-        os.system(cmd)
+        
+        try:
+            wget.download(cutout_url, out=dest_file)
+        except:
+            cmd = 'wget -O %s "%s"' % (dest_file, cutout_url)
+            os.system(cmd)
 
         print('Template downloaded as ' + dest_file + '\n')
 
@@ -455,7 +457,7 @@ if not os.path.exists(outdir): os.makedirs(outdir)
 # A file to write final magnitudes
 results_filename = os.path.join(outdir,'PSF_phot_'+str(int(time.time()))+'.txt')
 outFile = open(results_filename,'w')
-outFile.write('#image\ttarget\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tap_limit\tdet_limit\tZP\terr\ttemplate\tcomments')
+outFile.write('#image\ttarget\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tap_limit\tZP\terr\ttemplate\tcomments')
 
 
 
@@ -1049,6 +1051,15 @@ for f in usedfilters:
             photTab = photutils.aperture_photometry(data, photaps, error=err_array)
 
             print('Done')
+            
+            
+            goodStars = (photTab['aperture_sum']>10*photTab['aperture_sum_err'])
+            
+            seq_SNR = 10
+            
+            if len(goodStars[goodStars]) < 10:
+                goodStars = (photTab['aperture_sum']>5*photTab['aperture_sum_err'])
+                seq_SNR = 5
 
 
             # PSF Photometry
@@ -1117,6 +1128,8 @@ for f in usedfilters:
                                                     markersize=8,markeredgewidth=1.5)
 
                     ax1.errorbar(psfstars.center_flat[:,0],psfstars.center_flat[:,1],fmt='*',mfc='none', markeredgecolor='lime',markeredgewidth=2, markersize=20,label='Used in PSF fit')
+
+                    ax1.errorbar(co[:,0][goodStars],co[:,1][goodStars], fmt='s',mfc='none', markeredgecolor='midnightblue',markersize=8,markeredgewidth=2.5,label='SNR>'+str(seq_SNR))
 
                     ax1.legend(frameon=True,fontsize=16,loc='upper left')
 
@@ -1276,13 +1289,10 @@ for f in usedfilters:
 
             print('\n\nDoing aperture photometry for optimal aperture...')
 
-            photaps_opt = photutils.CircularAperture(co, r=aprad_opt)
+            photaps_opt = photutils.CircularAperture(co[goodStars], r=aprad_opt)
 
             photTab_opt = photutils.aperture_photometry(data, photaps_opt, error=err_array)
 
-            detected = (photTab_opt['aperture_sum']>3*photTab_opt['aperture_sum_err'])
-
-            faintest_object = max(seqMags[f][mag_range][inframe][goodpix][found][detected])
 
 
             print('Done')
@@ -1293,9 +1303,9 @@ for f in usedfilters:
 
             psfcoordTable = astropy.table.Table()
 
-            psfcoordTable['x_0'] = co[:,0]
-            psfcoordTable['y_0'] = co[:,1]
-            psfcoordTable['flux_0'] = photTab['aperture_sum']
+            psfcoordTable['x_0'] = co[:,0][goodStars]
+            psfcoordTable['y_0'] = co[:,1][goodStars]
+            psfcoordTable['flux_0'] = photTab['aperture_sum'][goodStars]
 
             grouper = photutils.psf.DAOGroup(crit_separation=stamprad)
 
@@ -1315,18 +1325,6 @@ for f in usedfilters:
                         vmin=visualization.ZScaleInterval().get_limits(data)[0],
                         vmax=visualization.ZScaleInterval().get_limits(data)[1])
 
-            goodStars = (photTab['aperture_sum']>10*photTab['aperture_sum_err'])
-            
-            seq_SNR = 10
-            
-            if len(goodStars[goodStars]) < 10:
-                goodStars = (photTab['aperture_sum']>5*photTab['aperture_sum_err'])
-                seq_SNR = 5
-
-            ax1.errorbar(co[:,0][goodStars],co[:,1][goodStars], fmt='s',mfc='none', markeredgecolor='midnightblue',markersize=8,markeredgewidth=2.5,label='SNR>'+str(seq_SNR))
-
-
-            ax1.legend(frameon=True,fontsize=16,loc='upper left')
 
 
             print('Done')
@@ -1346,14 +1344,14 @@ for f in usedfilters:
 
                     if magmin2 <= magmax2:
                         print('error: magmin brighter than magmax - resetting to defaults')
-                        magmin2 = 25
-                        magmax2 = 16
+                        magmin2 = magmin
+                        magmax2 = magmax
 
                     mag_range_2 = (seqMags[f][mag_range][inframe][goodpix][found][goodStars]>=magmax2) & (seqMags[f][mag_range][inframe][goodpix][found][goodStars]<=magmin2)
                 
                     
                     # PSF zeropoint
-                    flux = np.array(psfphotTab['flux_fit'])[goodStars]
+                    flux = np.array(psfphotTab['flux_fit'])
                     
                     seqIm = -2.5*np.log10(flux)
 
@@ -1374,11 +1372,6 @@ for f in usedfilters:
                     else:
                         checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < 0.5
 
-    #                if False in checkMags:
-    #                    print('Rejecting stars from ZP: ')
-    #                    print(psfphotTab['id'][goodStars][mag_range_2][~checkMags])
-    #                    print('Bad ZPs:')
-    #                    print( seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][~checkMags] - seqIm[mag_range_2][~checkMags])
 
                     ax1.errorbar(co[:,0][goodStars][mag_range_2][~checkMags],
                                 co[:,1][goodStars][mag_range_2][~checkMags],fmt='x',mfc='none',
@@ -1389,28 +1382,25 @@ for f in usedfilters:
 
                     zpList = seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags] - seqIm[mag_range_2][checkMags]
 
-                    ZP = np.median(zpList)
-                    errZP = np.std(zpList)#/np.sqrt(len(zpList))
-
                     ZP_psf = np.median(zpList)
                     errZP_psf = np.std(zpList)#/np.sqrt(len(zpList))
 
                     axZP.scatter(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags], zpList,color='k',label='psf')
 
-                    axZP.axhline(ZP,linestyle='-',color='k')
-                    axZP.axhline(ZP-errZP,linestyle='--',color='k')
-                    axZP.axhline(ZP+errZP,linestyle='--',color='k')
+                    axZP.axhline(ZP_psf,linestyle='-',color='k')
+                    axZP.axhline(ZP_psf-errZP_psf,linestyle='--',color='k')
+                    axZP.axhline(ZP_psf+errZP_psf,linestyle='--',color='k')
 
                     axZP.set_xlabel('Magnitude')
                     axZP.set_title('Zero point')
                     
-                    axZP.set_ylim(max(max(zpList)+0.5,ZP+1),min(min(zpList)-0.5,ZP-1))
+                    axZP.set_ylim(max(max(zpList)+0.5,ZP_psf+1),min(min(zpList)-0.5,ZP_psf-1))
                     axZP.set_xlim(min(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags])-0.2, max(seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags])+0.2)
                     
                     plt.draw()
      
                     # optimal aperture ZP
-                    flux = np.array(photTab_opt['aperture_sum'])[goodStars]
+                    flux = np.array(photTab_opt['aperture_sum'])
                     
                     seqIm = -2.5*np.log10(flux)
 
@@ -1423,12 +1413,6 @@ for f in usedfilters:
                         checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < errzp1*sigClip
                     else:
                         checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < 0.5
-
-        #                if False in checkMags:
-        #                    print('Rejecting stars from ZP: ')
-        #                    print(psfphotTab['id'][goodStars][mag_range_2][~checkMags])
-        #                    print('Bad ZPs:')
-        #                    print( seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][~checkMags] - seqIm[mag_range_2][~checkMags])
 
 
                     zpList = seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags] - seqIm[mag_range_2][checkMags]
@@ -1460,12 +1444,6 @@ for f in usedfilters:
                     else:
                         checkMags = np.abs(seqIm[mag_range_2]+zp1 - seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2]) < 0.5
 
-        #                if False in checkMags:
-        #                    print('Rejecting stars from ZP: ')
-        #                    print(psfphotTab['id'][goodStars][mag_range_2][~checkMags])
-        #                    print('Bad ZPs:')
-        #                    print( seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][~checkMags] - seqIm[mag_range_2][~checkMags])
-
 
                     zpList = seqMags[f][mag_range][inframe][goodpix][found][goodStars][mag_range_2][checkMags] - seqIm[mag_range_2][checkMags]
 
@@ -1491,11 +1469,18 @@ for f in usedfilters:
                             magmin2 = float(magmin1)
                     else:
                         happy = 'y'
-
+                        
+                    if errZP_psf > 5*errZP_opt or errZP_psf < 0.00001:
+                        if not quiet:
+                            badZP = input('\nPSF ZP may be unreliable (anomalous error).\nUse Big Aperture ZP instead? [y]' )
+                            if not badZP: badZP = 'y'
+                        else:
+                            badZP = 'y'
+                        if badZP in ('y','yes'):
+                            ZP_psf = ZP_ap
+                            errZP_psf = errZP_ap
 
             else:
-                ZP = np.nan
-                errZP = np.nan
                 ZP_psf = np.nan
                 errZP_psf = np.nan
                 ZP_opt = np.nan
@@ -1883,7 +1868,7 @@ for f in usedfilters:
                             try_again = input('\nTry varying parameters? (y/n) [y] ')
                             if not try_again: try_again = 'y'
 
-                            if try_again not in ('y','yes'):
+                            if try_again in ('n','no'):
                                 print('\nUsing unsubtracted data')
                                 template = ''
                                 break
@@ -2203,10 +2188,10 @@ for f in usedfilters:
                 comment1 += ' instrumental mag only'
 
 
-            print('> PSF mag = '+'%.2f +/- %.2f' %(calMagPsf,errMagPsf))
-            print('> Aperture mag (optimised aperture) = '+'%.2f +/- %.2f' %(calMagAp_opt,errMagAp_opt))
-            print('> Aperture mag (big aperture) = '+'%.2f +/- %.2f' %(calMagAp,errMagAp))
-            print('> Limiting mag (3 sigma, optimum ap) = '+'%.2f' %(calMagLim))
+            print('> PSF mag = %.2f +/- %.2f' %(calMagPsf,errMagPsf))
+            print('> Aperture mag (optimised aperture) = %.2f +/- %.2f' %(calMagAp_opt,errMagAp_opt))
+            print('> Aperture mag (big aperture) = %.2f +/- %.2f' %(calMagAp,errMagAp))
+            print('> Limiting mag (3 sigma, optimum ap) = %.2f' %(calMagLim))
 
             comment = ''
             if not quiet:
@@ -2215,7 +2200,7 @@ for f in usedfilters:
             if comment1:
                 comment += (' // '+comment1)
 
-            outFile.write('\n'+image+'\t%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,calMagLim,ZP,errZP,template,comment))
+            outFile.write('\n'+image+'\t%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP_psf,errZP_psf,template,comment))
 
         except Exception as e:
             exc_type, exc_obj, exc_tb = sys.exc_info()
