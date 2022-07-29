@@ -1470,15 +1470,19 @@ for f in usedfilters:
                     else:
                         happy = 'y'
                         
-                    if errZP_psf > 5*errZP_opt or errZP_psf < 0.00001:
-                        if not quiet:
-                            badZP = input('\nPSF ZP may be unreliable (anomalous error).\nUse Big Aperture ZP instead? [y]' )
-                            if not badZP: badZP = 'y'
-                        else:
-                            badZP = 'y'
-                        if badZP in ('y','yes'):
-                            ZP_psf = ZP_ap
-                            errZP_psf = errZP_ap
+                if errZP_psf > 5*errZP_opt or errZP_psf < 0.00001:
+                    if not quiet:
+                        badZP = input('\nPSF ZP may be unreliable (anomalous error).\nUse Big Aperture ZP instead? [y]' )
+                        if not badZP: badZP = 'y'
+                    else:
+                        badZP = 'y'
+                    if badZP in ('y','yes'):
+                        ZP_psf = ZP_ap
+                        errZP_psf = errZP_ap
+                        
+                    # NOTE: If PSF ZP looks really bad but aperture ZP is fine, it usually means the BasicPSFphotometry
+                    # task has catastrophically failed in centroiding and jumped hundreds of pixels away from stars
+                    # - seems to only happen if large numbers of sequence stars, can control with --magmin
 
             else:
                 ZP_psf = np.nan
