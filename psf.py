@@ -631,6 +631,8 @@ for f in usedfilters:
 
     ######## Search for sequence star file (RA, dec, mags)
 
+    seqFile = ''
+
     # Check folder/parent for sequence stars
     suggSeq = glob.glob('*seq.txt')
     if len(suggSeq)==0:
@@ -664,6 +666,7 @@ for f in usedfilters:
     if len(suggSeq)==0:
         if hasPS1 == True:
             print('Could not find sequence stars in this filter, but have PS1 for coordinates')
+            seqFile = 'PS1_seq.txt'
         else:
             print('No sequence star data found locally...')
             try:
@@ -682,10 +685,14 @@ for f in usedfilters:
                 print('Found SDSS stars')
             except:
                 print('SDSS query failed')
+                if hasPS1 == True:
+                    seqFile = 'PS1_seq.txt'
 
 
-    print('\n####################\n\nSequence star magnitudes: '+seqFile)
+    print('\n####################\n\nSequence stars: '+seqFile)
 
+    if seqFile == '':
+        print('Error, could not find stars for calibration, please provide file with RA, Dec, mag as *_seq.txt and rerun')
 
     seqDat = np.genfromtxt(seqFile)
     seqHead = np.genfromtxt(seqFile,skip_footer=len(seqDat)-1,dtype=str)
@@ -902,7 +909,10 @@ for f in usedfilters:
 
             # Set up sequence stars, initial steps
             
-            mag_range = (seqMags[f]>magmax)&(seqMags[f]<magmin)
+            if f in seqMags:
+                mag_range = (seqMags[f]>magmax)&(seqMags[f]<magmin)
+            else:
+                mag_range = np.ones(len(seqDat)).astype(bool)
             
             co = astropy.wcs.WCS(header=header).all_world2pix(seqDat[:,0],seqDat[:,1],1)
             co = np.array(list(zip(co[0],co[1])))
