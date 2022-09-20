@@ -1970,7 +1970,7 @@ for f in usedfilters:
                             try_again = input('\nTry varying parameters? (y/n) [y] ')
                             if not try_again: try_again = 'y'
 
-                            if try_again not in ('y','yes'):
+                            if try_again in ('n','no'):
                                 print('\nUsing unsubtracted data')
                                 template = ''
                                 do_sub = False
