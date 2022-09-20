@@ -2228,7 +2228,7 @@ for f in usedfilters:
             print(e)
             print('Line number:')
             print(exc_tb.tb_lineno)
-            outFile.write('\n'+image+'\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tFAILED')
+            outFile.write('\n'+image+'\t\t\t\t\t\t\t\t\t\t\t\t\t\tFAILED')
             if not quiet:
                 next = input('\n> Press enter to continue to next image')
 
