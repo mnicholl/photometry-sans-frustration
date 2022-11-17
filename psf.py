@@ -164,8 +164,11 @@ parser.add_argument('--quiet', dest='quiet', default=False, action='store_true',
 parser.add_argument('--stack', dest='stack', default=False, action='store_true',
                     help='Stack images that are in the same filter')
 
-parser.add_argument('--timebins', dest='bin', default=1.0, type=float,
+parser.add_argument('--time-bins', dest='bin', default=1.0, type=float,
                     help='Width of bins for stacking (in days)')
+
+parser.add_argument('--overwrite-stacks', dest='overwrite', default=False, action='store_true',
+                    help='Redo stacks even if stack already exists in time bin')
 
 parser.add_argument('--clean', dest='clean', default=False, action='store_true',
                     help='Clean images with lacosmic')
@@ -214,6 +217,7 @@ samp0 = args.samp
 quiet = args.quiet
 stack = args.stack
 timebins = args.bin
+overwrite_stacks = args.overwrite
 clean = args.clean
 sub = args.sub
 cutoutsize = args.cut
@@ -713,129 +717,127 @@ for f in usedfilters:
     ims2 = ims1[:,0].copy()
 
     if stack==True:
-        dostack = True
+#        dostack = True
         existing_stacks = glob.glob('stack*_'+f+'.fits')
-        if len(ims1[:,0]) < 2:
-            print('\nOnly 1 image in filter, skipping stacking!')
-            dostack = False
-        elif len(existing_stacks) > 0:
-            print('Already exists:')
-            print(existing_stacks)
-            if not quiet:
-                use_existing = input('\nStack(s) already found in filter, use existing where possible? [y]')
-                if not use_existing: use_existing = 'y'
+#        if len(ims1[:,0]) < 2:
+#            print('\nOnly 1 image in filter, skipping stacking!')
+#            dostack = False
+#        elif len(existing_stacks) > 0:
+#            print('Already exists:')
+#            print(existing_stacks)
+#            if not quiet:
+#                use_existing = input('\nStack(s) already found in filter, use existing where possible? [y]')
+#                if not use_existing: use_existing = 'y'
 #                if use_existing == 'y':
 #                    dostack = False
 #                    ims2 = glob.glob('stack*_'+f+'.fits')
 #            else:
-#                dostack = False
+#                dostack = True
 
 
-        if dostack == True:
-            ims2 = []
-            print('\nAligning and stacking images...')
-            mintime = np.min(filtertab[:,2][filtertab[:,1]==f].astype(float))
-            maxtime = np.max(filtertab[:,2][filtertab[:,1]==f].astype(float))
-            timerange = maxtime-mintime
-            tlim = mintime
-            binedges = [mintime]
-            while tlim < maxtime:
-                tlim += timebins
-                binedges.append(tlim)
-            print('Time bins:')
-            print(binedges)
+#        if dostack == True:
+        ims2 = []
+        print('\nAligning and stacking images...')
+        mintime = np.min(filtertab[:,2][filtertab[:,1]==f].astype(float))
+        maxtime = np.max(filtertab[:,2][filtertab[:,1]==f].astype(float))
+        timerange = maxtime-mintime
+        tlim = mintime
+        binedges = [mintime]
+        while tlim < maxtime:
+            tlim += timebins
+            binedges.append(tlim)
+        print('Time bins:')
+        print(binedges)
 
-            for bin in range(len(binedges)-1):
-                time_in_range = (ims1[:,2].astype(float)>=binedges[bin])&(ims1[:,2].astype(float)<binedges[bin+1])
-                stacktab = ims1[time_in_range]
-                if len(stacktab) > 0:
-                    go_on = False
-                    if use_existing in ('y','yes'):
-                        for prev_stack in existing_stacks:
-                            if prev_stack in stacktab:
-                                go_on = True
-                                print('using existing stack: '+prev_stack)
-                                ims2.append(prev_stack)
-                                if sub == True and has_template == True:
-                                    filtertab2.append([prev_stack, filtername, filtertab[:,2][filtertab[:,0]==prev_stack][0], template])
-                                else:
-                                    filtertab2.append([prev_stack, filtername, filtertab[:,2][filtertab[:,0]==prev_stack][0], ''])
-                                continue
-                        if go_on == True:
-                            continue
-                                
-                    stacktab2 = []
-                    for row in stacktab:
-                        if row[0] not in existing_stacks:
-                            stacktab2.append(row)
-                            
-                    stacktab = np.array(stacktab2)
-
-                    if len(stacktab) > 1:
-                        try:
-                            mjdstack = np.mean(stacktab[:,2].astype(float))
-
-                            zero_shift_image = stacktab[:,0][0]
-                            
-                            if clean == True:
-                                clean_zero, mask = lacosmic(fits.getdata(zero_shift_image))
-                                already_clean = True
-
-                            shifted_data = {}
-                            for im1 in stacktab[:,0]:
-                                print(im1)
-                                if clean == True:
-                                    print('Cleaning cosmics')
-                                    clean_source, mask = lacosmic(fits.getdata(im1))
-                                    registered, footprint = aa.register(np.array(clean_source, dtype="<f4"), np.array(clean_zero, dtype="<f4"), fill_value=np.nan)
-                                else:
-                                    registered, footprint = aa.register(np.array(fits.getdata(im1), dtype="<f4"), np.array(fits.getdata(zero_shift_image), dtype="<f4"), fill_value=np.nan)
-
-                                shifted_data[im1] = registered
-
-                            shifted_data_cube = np.stack([shifted_data[im1] for im1 in stacktab[:,0]])
-                            stacked_data = np.nanmedian(shifted_data_cube, axis=0)
-                            
-                            stackheader = fits.getheader(zero_shift_image)
-                            
-                            stackheader['MJD'] = mjdstack
-                            stackheader['MJD-OBS'] = mjdstack
-
-                            fits.writeto('stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits',
-                                    stacked_data,header=stackheader,
-                                    overwrite=True)
-                            
-                            ims2.append('stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits')
-                            
-                            print('Stack done: ' + str(np.round(mjdstack,2)))
-                            
-                            if sub == True and has_template == True:
-                                filtertab2.append(['stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits', filtername, mjdstack, template])
-                            else:
-                                filtertab2.append(['stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits', filtername, mjdstack, ''])
-
-                        except:
-                            print('Alignment/stacking failed in bin, using single images')
-                            for single_im in stacktab[:,0]:
-                                ims2.append(single_im)
-                                already_clean = False
-                                if sub == True and has_template == True:
-                                    filtertab2.append([single_im, filtername, filtertab[:,2][filtertab[:,0]==single_im][0], template])
-                                else:
-                                    filtertab2.append([single_im, filtername, filtertab[:,2][filtertab[:,0]==single_im][0], ''])
-
-                    elif len(stacktab[:,0]) == 1:
-                        print('Only one image in bin')
-                        ims2.append(stacktab[0][0])
-                        already_clean = False
+        for bin in range(len(binedges)-1):
+            time_in_range = (ims1[:,2].astype(float)>=binedges[bin])&(ims1[:,2].astype(float)<binedges[bin+1])
+            stacktab = ims1[time_in_range]
+            mjdstack = np.mean(stacktab[:,2].astype(float))
+            stackname = 'stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits'
+            if len(stacktab) > 0:
+                go_on = False
+                if overwrite_stacks == False:
+                    if stackname in existing_stacks:
+                        go_on = True
+                        print('using existing stack: '+stackname)
+                        ims2.append(stackname)
                         if sub == True and has_template == True:
-                            filtertab2.append([stacktab[0][0], filtername, filtertab[:,2][filtertab[:,0]==stacktab[0][0]][0], template])
+                            filtertab2.append([stackname, filtername, mjdstack, template])
                         else:
-                            filtertab2.append([stacktab[0][0], filtername, filtertab[:,2][filtertab[:,0]==stacktab[0][0]][0], ''])
+                            filtertab2.append([stackname, filtername, mjdstack, ''])
+                    if go_on == True:
+                        continue
+                            
+                stacktab2 = []
+                for row in stacktab:
+                    if row[0] not in existing_stacks:
+                        stacktab2.append(row)
+                        
+                stacktab = np.array(stacktab2)
 
+                if len(stacktab) > 1:
+                    try:
+                        zero_shift_image = stacktab[:,0][0]
+                        
+                        if clean == True:
+                            clean_zero, mask = lacosmic(fits.getdata(zero_shift_image))
+                            already_clean = True
+
+                        shifted_data = {}
+                        for im1 in stacktab[:,0]:
+                            print(im1)
+                            if clean == True:
+                                print('Cleaning cosmics')
+                                clean_source, mask = lacosmic(fits.getdata(im1))
+                                registered, footprint = aa.register(np.array(clean_source, dtype="<f4"), np.array(clean_zero, dtype="<f4"), fill_value=np.nan)
+                            else:
+                                registered, footprint = aa.register(np.array(fits.getdata(im1), dtype="<f4"), np.array(fits.getdata(zero_shift_image), dtype="<f4"), fill_value=np.nan)
+
+                            shifted_data[im1] = registered
+
+                        shifted_data_cube = np.stack([shifted_data[im1] for im1 in stacktab[:,0]])
+                        stacked_data = np.nanmedian(shifted_data_cube, axis=0)
+                        
+                        stackheader = fits.getheader(zero_shift_image)
+                        
+                        stackheader['MJD'] = mjdstack
+                        stackheader['MJD-OBS'] = mjdstack
+
+                        fits.writeto('stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits',
+                                stacked_data,header=stackheader,
+                                overwrite=True)
+                        
+                        ims2.append(stackname)
+                        
+                        print('Stack done: ' + str(np.round(mjdstack,2)))
+                        
+                        if sub == True and has_template == True:
+                            filtertab2.append([stackname, filtername, mjdstack, template])
+                        else:
+                            filtertab2.append([stackname, filtername, mjdstack, ''])
+
+                    except:
+                        print('Alignment/stacking failed in bin, using single images')
+                        for single_im in stacktab[:,0]:
+                            ims2.append(single_im)
+                            already_clean = False
+                            if sub == True and has_template == True:
+                                filtertab2.append([single_im, filtername, filtertab[:,2][filtertab[:,0]==single_im][0], template])
+                            else:
+                                filtertab2.append([single_im, filtername, filtertab[:,2][filtertab[:,0]==single_im][0], ''])
+
+                elif len(stacktab[:,0]) == 1:
+                    print('Only one image in bin')
+                    ims2.append(stacktab[0][0])
+                    already_clean = False
+                    if sub == True and has_template == True:
+                        filtertab2.append([stacktab[0][0], filtername, filtertab[:,2][filtertab[:,0]==stacktab[0][0]][0], template])
                     else:
-                        pass
-    
+                        filtertab2.append([stacktab[0][0], filtername, filtertab[:,2][filtertab[:,0]==stacktab[0][0]][0], ''])
+
+                else:
+                    pass
+
     filtertab2 = np.array(filtertab2)
     
 #################################
@@ -857,7 +859,8 @@ for f in usedfilters:
             
             counter += 1
 
-            if dostack == True:
+#            if dostack == True:
+            if stack == True:
                 mjd = filtertab2[:,2][filtertab2[:,0]==image][0]
                 if sub == True:
                     template = filtertab2[:,3][filtertab2[:,0]==image][0]
@@ -1823,10 +1826,6 @@ for f in usedfilters:
 
                 cutout_loop = 'y'
                 
-                
-                cutoutsize_new = cutoutsize
-                if f == 'u' and cutoutsize < 1600:
-                    cutoutsize_new = 1600
                 sci_sat_new = sci_sat
                 tmpl_sat_new = tmpl_sat
 
@@ -1836,7 +1835,13 @@ for f in usedfilters:
                 im_sci = fits.PrimaryHDU()
                 im_sci.data = data_orig
                 im_sci.header = header_orig
-                
+
+                cutoutsize_new = cutoutsize
+                if f == 'u' and cutoutsize < 1600:
+                    cutoutsize_new = 1600
+                if cutoutsize_new > min(data_orig.shape):
+                    cutoutsize_new = min(data_orig.shape)-1
+
                 
                 im2 = fits.open('tmpl_aligned.fits')
 
@@ -1885,7 +1890,7 @@ for f in usedfilters:
                         if not quiet:
                             print('Subtraction failed - can vary parameters or proceed without subtraction')
                             
-                            try_again = input('\nTry varying parameters? (y/n) [y] ')
+                            try_again = input('\nTry varying parameters? [y] ')
                             if not try_again: try_again = 'y'
 
                             if try_again in ('n','no'):
@@ -1939,7 +1944,7 @@ for f in usedfilters:
                                 vmin=visualization.ZScaleInterval().get_limits(data_sub)[0],
                                 vmax=visualization.ZScaleInterval().get_limits(data_sub)[1])
                                 
-                    ax1.errorbar(co[:,0]-(SNco[0]-cutoutsize_new/2.),co[:,1]-(SNco[1]-cutoutsize_new/2.), fmt='s',mfc='none',markeredgecolor='C0',markersize=8,markeredgewidth=1.5)
+                    ax1.errorbar(co[:,0]-(SNco[0]-data_sub.shape[0]/2.),co[:,1]-(SNco[1]-data_sub.shape[1]/2.), fmt='s',mfc='none',markeredgecolor='C0',markersize=8,markeredgewidth=1.5)
 
 
 
@@ -1953,7 +1958,7 @@ for f in usedfilters:
 
                     
 
-                    ax1.errorbar(cutoutsize_new/2.,cutoutsize_new/2.,fmt='o',markeredgecolor='r',mfc='none',
+                    ax1.errorbar(data_sub.shape[0]/2.,data_sub.shape[1]/2.,fmt='o',markeredgecolor='r',mfc='none',
                                     markeredgewidth=3,markersize=20)
                                     
                     
@@ -1967,7 +1972,7 @@ for f in usedfilters:
                         
                         if happy not in ('y','yes'):
                         
-                            try_again = input('\nTry varying parameters? (y/n) [y] ')
+                            try_again = input('\nTry varying parameters? [y] ')
                             if not try_again: try_again = 'y'
 
                             if try_again in ('n','no'):
@@ -1979,6 +1984,8 @@ for f in usedfilters:
 
                             cutoutsize1 = input('Try larger cutout size? ['+str(cutoutsize_new)+']')
                             if not cutoutsize1: cutoutsize1 = cutoutsize_new
+                            if cutoutsize_new > min(data_orig.shape):
+                                cutoutsize_new = min(data_orig.shape)-1
                             cutoutsize_new = int(cutoutsize1)
             
                             tmpl_sat1 = input('Try lower template saturation? ['+str(tmpl_sat_new)+']')
@@ -2002,8 +2009,8 @@ for f in usedfilters:
                 if do_sub == True:
                     data = data_sub
                     bkg_error = bkg_new_error
-                    SNco[0] = cutoutsize_new/2.
-                    SNco[1] = cutoutsize_new/2.
+                    SNco[0] = data.shape[0]/2.
+                    SNco[1] = data.shape[0]/2.
                 else:
                     plt.figure(1)
 
@@ -2029,9 +2036,13 @@ for f in usedfilters:
 
             print('\nDoing photometry on science target...')
 
+            SNco_orig = SNco.copy()
+
             if not forcepos:
-                SNco[0],SNco[1] = photutils.centroids.centroid_sources(data,SNco[0],SNco[1],
+                SNco_new = [0,0]
+                SNco_new[0],SNco_new[1] = photutils.centroids.centroid_sources(data,SNco[0],SNco[1],
                                              centroid_func=photutils.centroids.centroid_2dg)
+                SNco = [SNco_new[0][0],SNco_new[1][0]]
 
             plt.figure(1)
 
@@ -2062,6 +2073,40 @@ for f in usedfilters:
             ax4.add_patch(skycircle2)
 
             plt.draw()
+
+            like_pos = input('\nHappy with centroiding position? [y] ')
+            if not like_pos: like_pos = 'y'
+            if like_pos not in ('y','yes'):
+                print('Undo centroiding')
+                SNco = SNco_orig
+                
+                ax4.clear()
+                
+                ax4.imshow(data, origin='lower',cmap='gray',
+                        vmin=visualization.ZScaleInterval().get_limits(data)[0],
+                        vmax=visualization.ZScaleInterval().get_limits(data)[1])
+
+                ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
+                ax4.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
+
+                ax4.get_yaxis().set_visible(False)
+                ax4.get_xaxis().set_visible(False)
+
+                ax4.set_title('Target')
+
+                apcircle = Circle((SNco[0], SNco[1]), aprad_opt, facecolor='none',
+                        edgecolor='r', linewidth=3, alpha=1)
+                ax4.add_patch(apcircle)
+
+                skycircle1 = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+                        edgecolor='r', linewidth=2, alpha=1)
+                skycircle2 = Circle((SNco[0], SNco[1]), aprad+skyrad, facecolor='none',
+                        edgecolor='r', linewidth=2, alpha=1)
+                ax4.add_patch(skycircle1)
+                ax4.add_patch(skycircle2)
+
+                plt.draw()
+
 
 
             # apertures
