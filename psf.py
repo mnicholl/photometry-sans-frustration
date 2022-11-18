@@ -179,7 +179,7 @@ parser.add_argument('--sub', dest='sub', default=False, action='store_true',
 parser.add_argument('--noalign', dest='noalign', default=False, action='store_true',
                     help='Do not align template to image (use if already aligned)')
 
-parser.add_argument('--cut', dest='cut', default=600, type=int,
+parser.add_argument('--cut', dest='cut', default=1000, type=int,
                     help='Cutout size for image subtraction')
 
 parser.add_argument('--sci-sat', dest='sci_sat', default=50000, type=int,
@@ -1103,12 +1103,14 @@ for f in usedfilters:
                 
                 psf_iter = 0
                 
-                while (sumpsf < 0) or (minpsf < -0.01) or ((x_peak/len(psf) < 0.4) or (x_peak/len(psf) > 0.6)) or ((y_peak/len(psf) < 0.4) or (y_peak/len(psf) > 0.6)) and (psf_iter < 5):
+                while ((sumpsf < 0) or (minpsf < -0.01) or ((x_peak/len(psf) < 0.4) or (x_peak/len(psf) > 0.6)) or ((y_peak/len(psf) < 0.4) or (y_peak/len(psf) > 0.6))) and psf_iter < 5:
                 
                     if psf_iter > 0:
                         print('PSF failed quality checked, randomly varying parameters and trying again')
                         stamprad += np.random.randint(10)-5
                         psfthresh += np.random.randint(10)
+                        
+                    psf_iter += 1
 
                     # extract stars from image
                     psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*stamprad+5)
@@ -1154,7 +1156,7 @@ for f in usedfilters:
 
 
                     # build PSF
-                
+
                     try:
                         epsf_builder = photutils.EPSFBuilder(maxiters=10,recentering_maxiters=5,
                                         oversampling=samp,smoothing_kernel='quadratic',shape=2*stamprad-1)
@@ -1168,7 +1170,6 @@ for f in usedfilters:
                         minpsf = np.min(psf)
                         sumpsf = np.sum(psf)
                         
-                        psf_iter += 1
       
                         ax2 = plt.subplot2grid((2,5),(0,3))
 
@@ -1206,8 +1207,6 @@ for f in usedfilters:
                     except:
                         print('PSF fit failed (usually a weird EPSF_builder error):\nTrying different stamp size usually fixes!')
                         empirical = False
-
-                        psf_iter += 1
 
 
                 if not quiet:
