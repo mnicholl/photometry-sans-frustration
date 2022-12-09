@@ -179,13 +179,13 @@ parser.add_argument('--sub', dest='sub', default=False, action='store_true',
 parser.add_argument('--noalign', dest='noalign', default=False, action='store_true',
                     help='Do not align template to image (use if already aligned)')
 
-parser.add_argument('--cut', dest='cut', default=1000, type=int,
+parser.add_argument('--cutoutsize', dest='cut', default=1000, type=int,
                     help='Cutout size for image subtraction')
 
-parser.add_argument('--sci-sat', dest='sci_sat', default=50000, type=int,
+parser.add_argument('--sci-sat', dest='sci_sat', default=35000, type=int,
                     help='Max valid science pixel value for image subtraction')
 
-parser.add_argument('--tmpl-sat', dest='tmpl_sat', default=500000, type=int,
+parser.add_argument('--tmpl-sat', dest='tmpl_sat', default=350000, type=int,
                     help='Max valid template pixel value for image subtraction')
 
 parser.add_argument('--keep', dest='keep', default=False, action='store_true',
@@ -706,7 +706,7 @@ for f in usedfilters:
         seqMags[seqHead[i+2]] = seqDat[:,i+2]
 
 
-    already_clean = False
+    clean_list = []
 
     zero_shift_image = ''
     
@@ -739,7 +739,7 @@ for f in usedfilters:
         ims2 = []
         print('\nAligning and stacking images...')
         mintime = np.min(filtertab[:,2][filtertab[:,1]==f].astype(float))
-        maxtime = np.max(filtertab[:,2][filtertab[:,1]==f].astype(float))
+        maxtime = np.max(filtertab[:,2][filtertab[:,1]==f].astype(float)) + timebins
         timerange = maxtime-mintime
         tlim = mintime
         binedges = [mintime]
@@ -779,19 +779,28 @@ for f in usedfilters:
                     try:
                         zero_shift_image = stacktab[:,0][0]
                         
+                        zero_shift_header = fits.getheader(zero_shift_image)
+                        
                         if clean == True:
                             clean_zero, mask = lacosmic(fits.getdata(zero_shift_image))
-                            already_clean = True
 
                         shifted_data = {}
                         for im1 in stacktab[:,0]:
                             print(im1)
-                            if clean == True:
-                                print('Cleaning cosmics')
-                                clean_source, mask = lacosmic(fits.getdata(im1))
-                                registered, footprint = aa.register(np.array(clean_source, dtype="<f4"), np.array(clean_zero, dtype="<f4"), fill_value=np.nan)
-                            else:
-                                registered, footprint = aa.register(np.array(fits.getdata(im1), dtype="<f4"), np.array(fits.getdata(zero_shift_image), dtype="<f4"), fill_value=np.nan)
+                            try:
+                                if clean == True:
+                                    print('Cleaning cosmics')
+                                    clean_source, mask = lacosmic(fits.getdata(im1))
+                                    registered, footprint = aa.register(np.array(clean_source, dtype="<f4"), np.array(clean_zero, dtype="<f4"), fill_value=np.nan)
+                                else:
+                                    registered, footprint = aa.register(np.array(fits.getdata(im1), dtype="<f4"), np.array(fits.getdata(zero_shift_image), dtype="<f4"), fill_value=np.nan)
+
+                            except:
+                                registered, footprint = reproject_interp(fits.open(im1)[0], zero_shift_header)
+                                registered[np.isnan(registered)] = np.nanmedian(registered)
+                                
+                                clean_list.append(stackname)
+
 
                             shifted_data[im1] = registered
 
@@ -820,7 +829,7 @@ for f in usedfilters:
                         print('Alignment/stacking failed in bin, using single images')
                         for single_im in stacktab[:,0]:
                             ims2.append(single_im)
-                            already_clean = False
+                            clean_list.append(single_im)
                             if sub == True and has_template == True:
                                 filtertab2.append([single_im, filtername, filtertab[:,2][filtertab[:,0]==single_im][0], template])
                             else:
@@ -829,7 +838,7 @@ for f in usedfilters:
                 elif len(stacktab[:,0]) == 1:
                     print('Only one image in bin')
                     ims2.append(stacktab[0][0])
-                    already_clean = False
+                    clean_list.append(stacktab[0][0])
                     if sub == True and has_template == True:
                         filtertab2.append([stacktab[0][0], filtername, filtertab[:,2][filtertab[:,0]==stacktab[0][0]][0], template])
                     else:
@@ -905,7 +914,7 @@ for f in usedfilters:
             except:
                 gain = 1.0
 
-            if clean == True and already_clean == False:
+            if clean == True and image in clean_list:
                 print('\nCleaning cosmics...')
                 data, cosmicmask = lacosmic(data)
                 print('Done')
@@ -1108,6 +1117,7 @@ for f in usedfilters:
                     if psf_iter > 0:
                         print('PSF failed quality checked, randomly varying parameters and trying again')
                         stamprad += np.random.randint(10)-5
+                        stamprad = max([stamprad,10])
                         psfthresh += np.random.randint(10)
                         
                     psf_iter += 1
@@ -1692,6 +1702,7 @@ for f in usedfilters:
                         if psf_iter > 0:
                             print('PSF failed quality checked, randomly varying parameters and trying again')
                             stamprad2 += np.random.randint(10)-5
+                            stamprad2 = max([stamprad,10])
                             psfthresh2 = psfthresh0 + np.random.randint(20)
 
                         psfstars2 = photutils.psf.extract_stars(nddata2, psfinput2[photTab2['aperture_sum']>psfthresh2*photTab2['aperture_sum_err']], size=2*stamprad2+5)
@@ -1864,6 +1875,10 @@ for f in usedfilters:
                 while cutout_loop == 'y':
 
                     wcs = astropy.wcs.WCS(header_orig)
+                    
+                    if cutoutsize_new > min(data_orig.shape):
+                        cutoutsize_new = min(data_orig.shape)-1
+
 
                     cutout = Cutout2D(data_orig, position=SNco, size=(cutoutsize_new,cutoutsize_new), wcs=wcs)
 
@@ -1897,7 +1912,7 @@ for f in usedfilters:
                                 template = ''
                                 break
             
-                            cutoutsize1 = input('Try larger cutout size? ['+str(cutoutsize_new)+']')
+                            cutoutsize1 = input('Try different cutout size? ['+str(cutoutsize_new)+']')
                             if not cutoutsize1: cutoutsize1 = cutoutsize_new
                             cutoutsize_new = int(cutoutsize1)
             
@@ -1943,7 +1958,7 @@ for f in usedfilters:
                                 vmin=visualization.ZScaleInterval().get_limits(data_sub)[0],
                                 vmax=visualization.ZScaleInterval().get_limits(data_sub)[1])
                                 
-                    ax1.errorbar(co[:,0]-(SNco[0]-data_sub.shape[0]/2.),co[:,1]-(SNco[1]-data_sub.shape[1]/2.), fmt='s',mfc='none',markeredgecolor='C0',markersize=8,markeredgewidth=1.5)
+                    ax1.errorbar(co[:,0]-(SNco[0]-cutoutsize_new/2.),co[:,1]-(SNco[1]-cutoutsize_new/2.), fmt='s',mfc='none',markeredgecolor='C0',markersize=8,markeredgewidth=1.5)
 
 
 
@@ -1957,7 +1972,7 @@ for f in usedfilters:
 
                     
 
-                    ax1.errorbar(data_sub.shape[0]/2.,data_sub.shape[1]/2.,fmt='o',markeredgecolor='r',mfc='none',
+                    ax1.errorbar(cutoutsize_new/2.,cutoutsize_new/2.,fmt='o',markeredgecolor='r',mfc='none',
                                     markeredgewidth=3,markersize=20)
                                     
                     
@@ -1981,7 +1996,7 @@ for f in usedfilters:
             
                                 break
 
-                            cutoutsize1 = input('Try larger cutout size? ['+str(cutoutsize_new)+']')
+                            cutoutsize1 = input('Try different cutout size? ['+str(cutoutsize_new)+']')
                             if not cutoutsize1: cutoutsize1 = cutoutsize_new
                             if cutoutsize_new > min(data_orig.shape):
                                 cutoutsize_new = min(data_orig.shape)-1
@@ -2008,8 +2023,8 @@ for f in usedfilters:
                 if do_sub == True:
                     data = data_sub
                     bkg_error = bkg_new_error
-                    SNco[0] = data.shape[0]/2.
-                    SNco[1] = data.shape[0]/2.
+                    SNco[0] = cutoutsize_new//2.
+                    SNco[1] = cutoutsize_new//2.
                 else:
                     plt.figure(1)
 
