@@ -56,7 +56,7 @@ for i in datfiles:
             else:
                 band = data[2]
                 if band not in phot:
-                    phot[band] = {'PSFerr': [], 'PSFmag': [], 'ApBigerr': [], 'ApBigmag': [], 'ApOpterr': [], 'ApOptmag': [], 'mjd': []}
+                    phot[band] = {'mjd': [], 'BESTmag': [], 'BESTerr': [], 'PSFmag': [], 'PSFerr': [], 'ApOptmag': [],  'ApOpterr': [], 'ApBigmag': [], 'ApBigerr': [] }
                 phot[band]['mjd'].append(float(data[3]))
                 phot[band]['PSFmag'].append(float(data[4]))
                 phot[band]['PSFerr'].append(float(data[5]))
@@ -64,16 +64,22 @@ for i in datfiles:
                 phot[band]['ApOpterr'].append(float(data[7]))
                 phot[band]['ApBigmag'].append(float(data[8]))
                 phot[band]['ApBigerr'].append(float(data[9]))
+                if float(data[5])<=float(data[7])+0.05:
+                    phot[band]['BESTmag'].append(float(data[4]))
+                    phot[band]['BESTerr'].append(float(data[5]))
+                else:
+                    phot[band]['BESTmag'].append(float(data[6]))
+                    phot[band]['BESTerr'].append(float(data[7]))
 
 
 for band in phot:
     if band in cols:
-        plt.errorbar(phot[band]['mjd'],phot[band]['PSFmag']
-        ,phot[band]['PSFerr'],fmt='o',markersize=10,mfc=cols[band],
+        plt.errorbar(phot[band]['mjd'],phot[band]['BESTmag']
+        ,phot[band]['BESTerr'],fmt='o',markersize=10,mfc=cols[band],
         markeredgecolor=cols[band],ecolor=cols[band],label=band)
     else:
-        plt.errorbar(phot[band]['mjd'],phot[band]['PSFmag']
-        ,phot[band]['PSFerr'],fmt='o',markersize=10,mfc='k',
+        plt.errorbar(phot[band]['mjd'],phot[band]['BESTmag']
+        ,phot[band]['BESTerr'],fmt='o',markersize=10,mfc='k',
         markeredgecolor='k',label=band)
 
 handles, labels = plt.gca().get_legend_handles_labels()
@@ -108,10 +114,10 @@ if save:
     
     f = open(outfile,'w')
     
-    f.write('#MJD\tPSF\terr\tOptAp\terr\tBigAp\terr\tband\n')
+    f.write('#MJD\tMag\terr\tPSF\terr\tOptAp\terr\tBigAp\terr\tband\n')
 
     for i in labels:
         for j in range(len(phot[i]['mjd'])):
-            f.write('%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\n' %(phot[i]['mjd'][j], phot[i]['PSFmag'][j], phot[i]['PSFerr'][j], phot[i]['ApOptmag'][j], phot[i]['ApOpterr'][j], phot[i]['ApBigmag'][j], phot[i]['ApBigerr'][j], i))
+            f.write('%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\n' %(phot[i]['mjd'][j], phot[i]['BESTmag'][j], phot[i]['BESTerr'][j], phot[i]['PSFmag'][j], phot[i]['PSFerr'][j], phot[i]['ApOptmag'][j], phot[i]['ApOpterr'][j], phot[i]['ApBigmag'][j], phot[i]['ApBigerr'][j], i))
 
     f.close()

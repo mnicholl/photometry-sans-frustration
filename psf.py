@@ -1114,14 +1114,19 @@ for f in usedfilters:
                 
                 while ((sumpsf < 0) or (minpsf < -0.01) or ((x_peak/len(psf) < 0.4) or (x_peak/len(psf) > 0.6)) or ((y_peak/len(psf) < 0.4) or (y_peak/len(psf) > 0.6))) and psf_iter < 5:
                 
-                    if psf_iter > 0:
-                        print('PSF failed quality checked, randomly varying parameters and trying again')
-                        stamprad += np.random.randint(10)-5
-                        stamprad = max([stamprad,10])
-                        psfthresh += np.random.randint(10)
-                        
+                    if psf_iter > 5:
+                        break # WHY ISN'T WHILE LOOP DOING THIS?!
+                
                     psf_iter += 1
 
+                    print('Attempt: %d' %psf_iter)
+                
+                    if psf_iter > 1:
+                        print('PSF failed quality checked, randomly varying parameters and trying again')
+                        stamprad += np.random.randint(11)-5
+                        stamprad = max([stamprad,10])
+                        psfthresh += 5
+                        
                     # extract stars from image
                     psfstars = photutils.psf.extract_stars(nddata, psfinput[photTab['aperture_sum']>psfthresh*photTab['aperture_sum_err']], size=2*stamprad+5)
                     while(len(psfstars))<5 and psfthresh>0:
@@ -1697,13 +1702,20 @@ for f in usedfilters:
                     
                     psf_iter = 0
                     
-                    while (sumpsf < 0) or (minpsf < -0.01) or ((x_peak/len(psf2) < 0.4) or (x_peak/len(psf2) > 0.6)) or ((y_peak/len(psf2) < 0.4) or (y_peak/len(psf2) > 0.6)) and (psf_iter < 5):
-                    
-                        if psf_iter > 0:
+                    while (sumpsf < 0) or (minpsf < -0.01) or ((x_peak/len(psf2) < 0.4) or (x_peak/len(psf2) > 0.6)) or ((y_peak/len(psf2) < 0.4) or (y_peak/len(psf2) > 0.6)) and psf_iter < 5:
+
+                        if psf_iter > 5:
+                            break # WHY ISN'T WHILE LOOP DOING THIS?!
+
+                        psf_iter += 1
+
+                        print('Attempt: %d' %psf_iter)
+
+                        if psf_iter > 1:
                             print('PSF failed quality checked, randomly varying parameters and trying again')
-                            stamprad2 += np.random.randint(10)-5
+                            stamprad2 += np.random.randint(11)-5
                             stamprad2 = max([stamprad,10])
-                            psfthresh2 = psfthresh0 + np.random.randint(20)
+                            psfthresh2 += 5
 
                         psfstars2 = photutils.psf.extract_stars(nddata2, psfinput2[photTab2['aperture_sum']>psfthresh2*photTab2['aperture_sum_err']], size=2*stamprad2+5)
                         while(len(psfstars2))<5 and psfthresh2>0:
@@ -1738,8 +1750,6 @@ for f in usedfilters:
                             minpsf = np.min(psf2)
                             sumpsf = np.sum(psf2)
                             
-                            psf_iter += 1
-
 
                             ax2t = plt.subplot2grid((2,5),(0,3))
 
@@ -1779,7 +1789,6 @@ for f in usedfilters:
                             print('PSF fit failed (usually a weird EPSF_builder error):\nTrying different stamp size usually fixes!')
                             empirical = False
 
-                            psf_iter += 1
 
 
                     if not quiet:
@@ -2088,38 +2097,39 @@ for f in usedfilters:
 
             plt.draw()
 
-            like_pos = input('\nHappy with centroiding position? [y] ')
-            if not like_pos: like_pos = 'y'
-            if like_pos not in ('y','yes'):
-                print('Undo centroiding')
-                SNco = SNco_orig
-                
-                ax4.clear()
-                
-                ax4.imshow(data, origin='lower',cmap='gray',
-                        vmin=visualization.ZScaleInterval().get_limits(data)[0],
-                        vmax=visualization.ZScaleInterval().get_limits(data)[1])
+            if not quiet:
+                like_pos = input('\nHappy with centroiding position? [y] ')
+                if not like_pos: like_pos = 'y'
+                if like_pos not in ('y','yes'):
+                    print('Undo centroiding')
+                    SNco = SNco_orig
+                    
+                    ax4.clear()
+                    
+                    ax4.imshow(data, origin='lower',cmap='gray',
+                            vmin=visualization.ZScaleInterval().get_limits(data)[0],
+                            vmax=visualization.ZScaleInterval().get_limits(data)[1])
 
-                ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
-                ax4.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
+                    ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
+                    ax4.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
 
-                ax4.get_yaxis().set_visible(False)
-                ax4.get_xaxis().set_visible(False)
+                    ax4.get_yaxis().set_visible(False)
+                    ax4.get_xaxis().set_visible(False)
 
-                ax4.set_title('Target')
+                    ax4.set_title('Target')
 
-                apcircle = Circle((SNco[0], SNco[1]), aprad_opt, facecolor='none',
-                        edgecolor='r', linewidth=3, alpha=1)
-                ax4.add_patch(apcircle)
+                    apcircle = Circle((SNco[0], SNco[1]), aprad_opt, facecolor='none',
+                            edgecolor='r', linewidth=3, alpha=1)
+                    ax4.add_patch(apcircle)
 
-                skycircle1 = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
-                        edgecolor='r', linewidth=2, alpha=1)
-                skycircle2 = Circle((SNco[0], SNco[1]), aprad+skyrad, facecolor='none',
-                        edgecolor='r', linewidth=2, alpha=1)
-                ax4.add_patch(skycircle1)
-                ax4.add_patch(skycircle2)
+                    skycircle1 = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+                            edgecolor='r', linewidth=2, alpha=1)
+                    skycircle2 = Circle((SNco[0], SNco[1]), aprad+skyrad, facecolor='none',
+                            edgecolor='r', linewidth=2, alpha=1)
+                    ax4.add_patch(skycircle1)
+                    ax4.add_patch(skycircle2)
 
-                plt.draw()
+                    plt.draw()
 
 
 
