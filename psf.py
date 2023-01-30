@@ -128,6 +128,9 @@ parser.add_argument('--magmin', dest='magmin', default=20, type=float,
 parser.add_argument('--magmax', dest='magmax', default=16, type=float,
                     help='Brightest sequence stars to use')
 
+parser.add_argument('--queryrad', dest='queryrad', default=5, type=float,
+                    help='Search radius for PS1/SDSS sequence stars')
+
 parser.add_argument('--shifts', dest='shifts', default=False, action='store_true',
                     help='Apply manual shifts if WCS is a bit off')
 
@@ -204,6 +207,7 @@ if magmin < magmax:
     magmin = 20
     magmax = 16
 
+queryrad = args.queryrad
 shifts = args.shifts
 aprad = args.aprad
 apfrac = args.apfrac
@@ -262,12 +266,12 @@ if len(ims) == 0:
 
 ##### FUNCTIONS TO QUERY PANSTARRS #######
 
-def PS1catalog(ra,dec,magmin=25,magmax=8):
+def PS1catalog(ra,dec,magmin=25,magmax=8,queryrad=5):
 
     queryurl = 'https://catalogs.mast.stsci.edu/api/v0.1/panstarrs/dr2/stack?'
     queryurl += 'ra='+str(ra)
     queryurl += '&dec='+str(dec)
-    queryurl += '&radius=0.083'
+    queryurl += '&radius='+str(queryrad/60.)
     queryurl += '&columns=[raStack,decStack,gPSFMag,rPSFMag,iPSFMag,zPSFMag,yPSFMag,iKronMag]'
     queryurl += '&nDetections.gte=6&pagesize=10000'
 
@@ -390,13 +394,13 @@ def SDSScutouts(ra,dec,filt):
     return dest_file
         
         
-def SDSScatalog(ra,dec,magmin=25,magmax=8):
+def SDSScatalog(ra,dec,magmin=25,magmax=8,queryrad=5):
  
     print('\nQuerying SDSS for reference stars via Astroquery...\n')
 
     pos = coords.SkyCoord(str(ra)+' '+str(dec), unit='deg', frame='icrs')
     
-    data = SDSS.query_region(pos,radius='0.1d',fields=('ra','dec','u','g','r','i','z','type'))
+    data = SDSS.query_region(pos,radius=str(queryrad/60.)+'d',fields=('ra','dec','u','g','r','i','z','type'))
     
     data = data[data['type'] == 6]
 
@@ -674,7 +678,7 @@ for f in usedfilters:
         else:
             print('No sequence star data found locally...')
             try:
-                PS1catalog(RAdec[0],RAdec[1])
+                PS1catalog(RAdec[0],RAdec[1],queryrad=queryrad)
                 seqFile = 'PS1_seq.txt'
                 print('Found PS1 stars')
                 trySDSS = False
@@ -684,7 +688,7 @@ for f in usedfilters:
         # if not in PS1 or filter is u-band, query also SDSS
         if f == 'u' or trySDSS == True:
             try:
-                SDSScatalog(RAdec[0],RAdec[1])
+                SDSScatalog(RAdec[0],RAdec[1],queryrad=queryrad)
                 seqFile = 'SDSS_seq.txt'
                 print('Found SDSS stars')
             except:
@@ -2290,6 +2294,11 @@ for f in usedfilters:
                 comment += (' // '+comment1)
 
             outFile.write('\n'+image+'\t%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP_psf,errZP_psf,template,comment))
+            
+            fig_filename = os.path.join(outdir,'PSF_phot_'+str(int(time.time()))+'_'+image+'.pdf')
+
+            plt.savefig(fig_filename)
+
 
         except Exception as e:
             exc_type, exc_obj, exc_tb = sys.exc_info()
