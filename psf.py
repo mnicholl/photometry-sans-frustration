@@ -152,8 +152,8 @@ parser.add_argument('--box', dest='bkgbox', default=200, type=int,
 parser.add_argument('--psfthresh', dest='psfthresh', default=20., type=float,
                     help='SNR threshold for inclusion in PSF model')
 
-parser.add_argument('--sigma', dest='sigma_gauss', default=2., type=float,
-                    help='Sigma for basic Gaussian PSF (used when insufficient stars)')
+parser.add_argument('--fwhm', dest='fwhm_gauss', default=10., type=float,
+                    help='FWHM for basic Gaussian PSF (used when insufficient stars)')
 
 parser.add_argument('--zpsig', dest='sigClip', default=1, type=int,
                     help='Sigma clipping for rejecting sequence stars')
@@ -215,7 +215,7 @@ stamprad0 = args.stamprad
 skyrad = args.skyrad
 bkgbox = args.bkgbox
 psfthresh0 = args.psfthresh
-sigma_gauss_0 = args.sigma_gauss
+fwhm_gauss_0 = args.fwhm_gauss
 sigClip = args.sigClip
 samp0 = args.samp
 quiet = args.quiet
@@ -1255,19 +1255,19 @@ for f in usedfilters:
                 print('\nNo PSF determined, using basic Gaussian model')
                 
                 if not quiet:
-                    sigma_gauss = input('Please specify width (sigma) in pixels ['+str(sigma_gauss_0)+'] ')
-                    if not sigma_gauss: sigma_gauss = sigma_gauss_0
+                    fwhm_gauss = input('Please specify width (FWHM) in pixels ['+str(fwhm_gauss_0)+'] ')
+                    if not fwhm_gauss: fwhm_gauss = fwhm_gauss_0
                 else:
-                    sigma_gauss = sigma_gauss_0
-                sigma_gauss = float(sigma_gauss)
+                    fwhm_gauss = fwhm_gauss_0
+                fwhm_gauss = float(fwhm_gauss)
                 
-                epsf = IntegratedGaussianPRF(sigma=sigma_gauss)
+                epsf = IntegratedGaussianPRF(sigma=fwhm_gauss/2.355)
                 
                 psf = np.zeros((2*stamprad+1,2*stamprad+1))
                 
                 for xt in np.arange(2*stamprad+1):
                     for yt in np.arange(2*stamprad+1):
-                        psf[xt,yt] = epsf.evaluate(xt,yt,x_0=stamprad,y_0=stamprad,sigma=sigma_gauss,flux=1)
+                        psf[xt,yt] = epsf.evaluate(xt,yt,x_0=stamprad,y_0=stamprad,sigma=fwhm_gauss/2.355,flux=1)
             
 
                 ax2 = plt.subplot2grid((2,5),(0,3))
@@ -1822,19 +1822,19 @@ for f in usedfilters:
                     print('\nNo PSF determined, using basic Gaussian model')
                     
                     if not quiet:
-                        sigma_gauss2 = input('Please specify width (sigma) in pixels ['+str(sigma_gauss_0)+'] ')
-                        if not sigma_gauss2: sigma_gauss2 = sigma_gauss_0
+                        fwhm_gauss2 = input('Please specify width (FWHM) in pixels ['+str(fwhm_gauss_0)+'] ')
+                        if not fwhm_gauss2: fwhm_gauss2 = fwhm_gauss_0
                     else:
-                        sigma_gauss2 = sigma_gauss_0
-                    sigma_gauss2 = float(sigma_gauss2)
+                        fwhm_gauss2 = fwhm_gauss_0
+                    fwhm_gauss2 = float(fwhm_gauss2)
                     
-                    epsf2 = IntegratedGaussianPRF(sigma=sigma_gauss2)
+                    epsf2 = IntegratedGaussianPRF(sigma=fwhm_gauss2/2.355)
                     
                     psf2 = np.zeros((2*stamprad2+1,2*stamprad2+1))
                     
                     for xt in np.arange(2*stamprad2+1):
                         for yt in np.arange(2*stamprad2+1):
-                            psf2[xt,yt] = epsf2.evaluate(xt,yt,x_0=stamprad2,y_0=stamprad2,sigma=sigma_gauss2,flux=1)
+                            psf2[xt,yt] = epsf2.evaluate(xt,yt,x_0=stamprad2,y_0=stamprad2,sigma=fwhm_gauss2/2.355,flux=1)
 
 
 

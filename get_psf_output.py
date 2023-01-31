@@ -39,10 +39,11 @@ plt.clf()
 
 datfiles = []
 
-for root, dirs, files in os.walk(".", topdown=False):
+for root, dirs, files in os.walk('.', topdown=False):
     for name in files:
         if 'PSF_phot' in name:
-            datfiles.append(os.path.join(root, name))
+            if '.txt' in name:
+                datfiles.append(os.path.join(root, name))
 
 
 
