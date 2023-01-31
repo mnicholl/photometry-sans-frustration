@@ -1923,6 +1923,7 @@ for f in usedfilters:
                             if try_again in ('n','no'):
                                 print('\nUsing unsubtracted data')
                                 template = ''
+                                do_sub = False
                                 break
             
                             cutoutsize1 = input('Try different cutout size? ['+str(cutoutsize_new)+']')
