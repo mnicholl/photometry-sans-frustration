@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 
-version = '1.5'
+version = '1.6'
 
 '''
     PSF: PHOTOMETRY SANS FRUSTRATION
 
-    Written by Matt Nicholl, 2015-2022
+    Written by Matt Nicholl, 2015-2023
 
     Requirements:
 
@@ -77,6 +77,7 @@ from skimage.transform import warp
 from scipy.ndimage import interpolation as interp
 import time
 from astroquery.sdss import SDSS
+from astroquery.ipac.irsa import Irsa
 from astropy import coordinates as coords
 import astropy.units as u
 from astropy.io import fits
@@ -129,7 +130,10 @@ parser.add_argument('--magmax', dest='magmax', default=16, type=float,
                     help='Brightest sequence stars to use')
 
 parser.add_argument('--queryrad', dest='queryrad', default=5, type=float,
-                    help='Search radius for PS1/SDSS sequence stars')
+                    help='Search radius in arcmins for PS1/SDSS sequence stars')
+
+parser.add_argument('--templatesize', dest='templatesize', default=5, type=float,
+                    help='Size of PS1 cutouts in arcmins')
 
 parser.add_argument('--shifts', dest='shifts', default=False, action='store_true',
                     help='Apply manual shifts if WCS is a bit off')
@@ -208,6 +212,7 @@ if magmin < magmax:
     magmax = 16
 
 queryrad = args.queryrad
+templatesize = args.templatesize
 shifts = args.shifts
 aprad = args.aprad
 apfrac = args.apfrac
@@ -319,7 +324,9 @@ def PS1catalog(ra,dec,magmin=25,magmax=8,queryrad=5):
 
 
 
-def PS1cutouts(ra,dec,filt):
+def PS1cutouts(ra,dec,filt,size=1):
+
+    size_pix = int(size * 240) # arcmins to pixels
 
     print('\nSearching for PS1 images of field...\n')
 
@@ -336,8 +343,9 @@ def PS1cutouts(ra,dec,filt):
 
         print('Image found: ' + image_name + '\n')
 
-        cutout_url = 'http://ps1images.stsci.edu/cgi-bin/fitscut.cgi?&filetypes=stack&size=2500'
-
+        cutout_url = 'http://ps1images.stsci.edu/cgi-bin/fitscut.cgi?&filetypes=stack'
+        
+        cutout_url += '&size='+str(size_pix)
         cutout_url += '&ra='+str(ra)
         cutout_url += '&dec='+str(dec)
         cutout_url += '&filters='+filt
@@ -429,6 +437,46 @@ def SDSScatalog(ra,dec,magmin=25,magmax=8,queryrad=5):
     data2.write('SDSS_seq.txt',format='ascii',overwrite=True, exclude_names=['type'],delimiter='\t')
     
     print('Success! Sequence star file created: SDSS_seq.txt')
+
+
+def TWOMASScatalog(ra,dec,magmin=25,magmax=8,queryrad=5):
+ 
+    print('\nQuerying 2MASS for reference stars via Astroquery...\n')
+
+    pos = coords.SkyCoord(str(ra)+' '+str(dec), unit='deg', frame='icrs')
+        
+    data = Irsa.query_region(pos,radius=str(queryrad/60.)+'d',catalog='fp_psc')
+
+    
+#    # NEED TO REMOVE DUPLICATES
+#
+#    catalog = coords.SkyCoord(ra=data['ra']*u.degree, dec=data['dec']*u.degree)
+#
+#    data2 = data[:0].copy()
+#
+#    indices = np.arange(len(data))
+#
+#    used = []
+#
+#    for i in data:
+#        source = coords.SkyCoord(ra=i['ra']*u.degree, dec=i['dec']*u.deg)
+#        d2d = source.separation(catalog)
+#        catalogmsk = d2d < 2.5*u.arcsec
+#        indexmatch = indices[catalogmsk]
+#        for j in indexmatch:
+#            if j not in used:
+#                data2.add_row(data[j])
+#                for k in indexmatch:
+#                    used.append(k)
+
+
+    data.rename_column('j_m', 'J')
+    data.rename_column('h_m', 'H')
+    data.rename_column('k_m', 'K')
+    
+    data['ra','dec','J','H','K'].write('2MASS_seq.txt',format='ascii',overwrite=True, delimiter='\t')
+    
+    print('Success! Sequence star file created: 2MASS_seq.txt')
 
 
 # Try to match header keyword to a known filter automatically:
@@ -585,7 +633,7 @@ for image in ims:
                 print('No template found locally...')
                 if filtername in ('g','r','i','z','y'):
                     try:
-                        template = PS1cutouts(RAdec[0],RAdec[1],filtername)
+                        template = PS1cutouts(RAdec[0],RAdec[1],filtername,size=templatesize)
                     except:
                         print('Error: could not match template from PS1')
                         template = ''
@@ -595,6 +643,8 @@ for image in ims:
                     except:
                         print('Error: could not match template from SDSS')
                         template = ''
+#                if filtername in ('J','H','K'):
+#                    2MASS? VISTA?
 
 
         filtertab.append([image, filtername, mjd, template])
@@ -640,6 +690,9 @@ for f in usedfilters:
     ######## Search for sequence star file (RA, dec, mags)
 
     seqFile = ''
+    
+    hasPS1 = False
+    trySDSS = False
 
     # Check folder/parent for sequence stars
     suggSeq = glob.glob('*seq.txt')
@@ -695,6 +748,13 @@ for f in usedfilters:
                 print('SDSS query failed')
                 if hasPS1 == True:
                     seqFile = 'PS1_seq.txt'
+        if f in ('J','H','K'):
+            try:
+                TWOMASScatalog(RAdec[0],RAdec[1],queryrad=queryrad)
+                seqFile = '2MASS_seq.txt'
+                print('Found 2MASS stars')
+            except:
+                print('2MASS query failed')
 
 
     print('\n####################\n\nSequence stars: '+seqFile)
@@ -1567,11 +1627,42 @@ for f in usedfilters:
 
 
 
-                    ### Using Astroalign
+                    ### Old method -- try using Astroalign first
 
+#                    try:
+#                        im_fixed = np.array(data, dtype="<f4")
+#                        tmp_fixed = np.array(data2, dtype="<f4")
+#
+#                        registered, footprint = aa.register(tmp_fixed, im_fixed)
+#
+#                        tmp_masked = np.ma.masked_array(registered, footprint, fill_value=np.nanmedian(tmp_fixed)).filled()
+#
+#                        tmp_masked[np.isnan(tmp_masked)] = np.nanmedian(tmp_fixed)
+#
+#                        hdu2 = fits.PrimaryHDU(tmp_masked)
+#
+#                        hdu2.writeto('tmpl_aligned.fits',overwrite=True)
+#
+#                    except:
+#
+#                        print('Astroalign failed to match images, trying Reproject')
+                    
+                    
+                    # New method: reproject first, then try astroalign
+                    
+                    ### Using Reproject
+
+                    tmp_resampled, footprint = reproject_interp(tmp, header)
+
+                    tmp_resampled[np.isnan(tmp_resampled)] = np.nanmedian(tmp_resampled)
+
+#                        hdu2 = fits.PrimaryHDU(tmp_resampled)
+                    
                     try:
+                        print('Tweaking registered image with Astroalign')
+                        
                         im_fixed = np.array(data, dtype="<f4")
-                        tmp_fixed = np.array(data2, dtype="<f4")
+                        tmp_fixed = np.array(tmp_resampled, dtype="<f4")
 
                         registered, footprint = aa.register(tmp_fixed, im_fixed)
 
@@ -1580,22 +1671,12 @@ for f in usedfilters:
                         tmp_masked[np.isnan(tmp_masked)] = np.nanmedian(tmp_fixed)
 
                         hdu2 = fits.PrimaryHDU(tmp_masked)
-
-                        hdu2.writeto('tmpl_aligned.fits',overwrite=True)
-            
+                    
                     except:
-                    
-                        print('Astroalign failed to match images, trying Reproject')
-                    
-                    ### Using Reproject
-
-                        tmp_resampled, footprint = reproject_interp(tmp, header)
-
-                        tmp_resampled[np.isnan(tmp_resampled)] = np.nanmedian(tmp_resampled)
-
                         hdu2 = fits.PrimaryHDU(tmp_resampled)
 
-                        hdu2.writeto('tmpl_aligned.fits',overwrite=True)
+
+                    hdu2.writeto('tmpl_aligned.fits',overwrite=True)
 
 
                     im2 = fits.open('tmpl_aligned.fits')
@@ -1911,7 +1992,7 @@ for f in usedfilters:
 
                     try:
                         im_sub = run_subtraction('sci_trim.fits','tmpl_trim.fits','sci_psf.fits',
-                        'tmpl_psf.fits',normalization='science',n_stamps=4,science_saturation=sci_sat_new, reference_saturation=tmpl_sat_new)
+                        'tmpl_psf.fits',normalization='science',n_stamps=8,science_saturation=sci_sat_new, reference_saturation=tmpl_sat_new)
                                             
                     except:
                         if not quiet:
@@ -2037,8 +2118,8 @@ for f in usedfilters:
                 if do_sub == True:
                     data = data_sub
                     bkg_error = bkg_new_error
-                    SNco[0] = cutoutsize_new//2.
-                    SNco[1] = cutoutsize_new//2.
+                    SNco[0] = cutoutsize_new/2.
+                    SNco[1] = cutoutsize_new/2.
                 else:
                     plt.figure(1)
 
@@ -2066,11 +2147,10 @@ for f in usedfilters:
 
             SNco_orig = SNco.copy()
 
-            if not forcepos:
-                SNco_new = [0,0]
-                SNco_new[0],SNco_new[1] = photutils.centroids.centroid_sources(data,SNco[0],SNco[1],
-                                             centroid_func=photutils.centroids.centroid_2dg)
-                SNco = [SNco_new[0][0],SNco_new[1][0]]
+            SNco_new = [0,0]
+            SNco_new[0],SNco_new[1] = photutils.centroids.centroid_sources(data,SNco[0],SNco[1],
+                                         centroid_func=photutils.centroids.centroid_2dg,box_size=3)
+            SNco = [SNco_new[0][0],SNco_new[1][0]]
 
             plt.figure(1)
 
@@ -2102,10 +2182,10 @@ for f in usedfilters:
 
             plt.draw()
 
-            if not quiet:
+            if quiet == False:
                 like_pos = input('\nHappy with centroiding position? [y] ')
                 if not like_pos: like_pos = 'y'
-                if like_pos not in ('y','yes'):
+                if like_pos in ('n','no'):
                     print('Undo centroiding')
                     SNco = SNco_orig
                     
@@ -2136,6 +2216,9 @@ for f in usedfilters:
 
                     plt.draw()
 
+            if not forcepos:
+                epsf.x_0.fixed = True
+                epsf.y_0.fixed = True
 
 
             # apertures
