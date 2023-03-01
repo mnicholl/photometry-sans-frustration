@@ -2215,6 +2215,46 @@ for f in usedfilters:
                     ax4.add_patch(skycircle2)
 
                     plt.draw()
+                    
+                    x_sh_new = input('Specify shift in x position? [0.0] ')
+                    if not x_sh_new: x_sh_new = 0
+                    x_sh_new = float(x_sh_new)
+
+                    y_sh_new = input('Specify shift in y position? [0.0] ')
+                    if not y_sh_new: y_sh_new = 0
+                    y_sh_new = float(y_sh_new)
+
+                    SNco[0] += x_sh_new
+                    SNco[1] += y_sh_new
+                    
+                    ax4.clear()
+                    
+                    ax4.imshow(data, origin='lower',cmap='gray',
+                            vmin=visualization.ZScaleInterval().get_limits(data)[0],
+                            vmax=visualization.ZScaleInterval().get_limits(data)[1])
+
+                    ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
+                    ax4.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
+
+                    ax4.get_yaxis().set_visible(False)
+                    ax4.get_xaxis().set_visible(False)
+
+                    ax4.set_title('Target')
+
+                    apcircle = Circle((SNco[0], SNco[1]), aprad_opt, facecolor='none',
+                            edgecolor='r', linewidth=3, alpha=1)
+                    ax4.add_patch(apcircle)
+
+                    skycircle1 = Circle((SNco[0], SNco[1]), aprad, facecolor='none',
+                            edgecolor='r', linewidth=2, alpha=1)
+                    skycircle2 = Circle((SNco[0], SNco[1]), aprad+skyrad, facecolor='none',
+                            edgecolor='r', linewidth=2, alpha=1)
+                    ax4.add_patch(skycircle1)
+                    ax4.add_patch(skycircle2)
+
+                    plt.draw()
+
+
 
             if not forcepos:
                 epsf.x_0.fixed = True
