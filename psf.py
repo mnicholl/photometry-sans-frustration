@@ -92,6 +92,8 @@ import warnings
 import signal
 import wget
 from astroquery.astrometry_net import AstrometryNet
+from astropy.stats import sigma_clipped_stats
+from photutils.detection import find_peaks
 
 
 def handler(signum, frame):
@@ -997,11 +999,23 @@ for f in usedfilters:
             if astrometry == True:
                 print('\nAttempting astrometry solve...')
                 try:
+                    astmean, astmedian, aststd = sigma_clipped_stats(data, sigma=3.0)
+                    astthreshold = astmedian + (5.0 * aststd)
+
+                    sources = find_peaks(data, astthreshold, box_size=51)
+                    sources.sort('peak_value')
+                    sources.reverse()
+
                     ast = AstrometryNet()
-                    wcs_header = ast.solve_from_image(image,detect_threshold=30)
-                    # Apply wcs...
+                    wcs_header = ast.solve_from_source_list(sources['x_peak'][:100], sources['y_peak'][:100], solve_timeout=600, center_ra=RAdec[0], center_dec=RAdec[1], radius=0.2, parity=2, image_width=header['NAXIS1'], image_height=header['NAXIS2'])
+
+                    for i in wcs_header.cards:
+                        header.set(i[0],i[1],i[2])
+
                 except:
                     print('Astrometry failed')
+                    print('If API key error, you probably need to edit astroquery config')
+                    print('See: https://astroquery.readthedocs.io/en/latest/astrometry_net/astrometry_net.html')
 
             # Set up sequence stars, initial steps
             
@@ -1039,7 +1053,7 @@ for f in usedfilters:
 
             data[np.isinf(data)] = np.median(data)
 
-            print('\nSubtracting background...')
+            print('\n\nSubtracting background...')
 
             bkg = photutils.background.Background2D(data,box_size=bkgbox)
             
