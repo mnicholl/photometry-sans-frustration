@@ -91,8 +91,9 @@ from ccdproc import cosmicray_lacosmic as lacosmic
 import warnings
 import signal
 import wget
- 
- 
+from astroquery.astrometry_net import AstrometryNet
+
+
 def handler(signum, frame):
     res = input('\n > Paused. Do you want (c)ontinue, (q)uit and save, or (s)kip image? ')
     if res == 's':
@@ -199,7 +200,14 @@ parser.add_argument('--keep', dest='keep', default=False, action='store_true',
                     help='Keep intermediate products')
 
 parser.add_argument('--force', dest='forcepos', default=False, action='store_true',
-                    help='Do not recenter on transient')
+                    help='Do not centroid apertures on transient')
+
+parser.add_argument('--forcepsf', dest='forcepsf', default=False, action='store_true',
+                    help='Do not allow PSF model to recenter when fitting transient')
+
+parser.add_argument('--astrometry', dest='astrometry', default=False, action='store_true',
+                    help='Attempt WCS calibration with astrometry.net')
+
 
 args = parser.parse_args()
 
@@ -235,6 +243,8 @@ tmpl_sat = args.tmpl_sat
 sci_sat = args.sci_sat
 keep = args.keep
 forcepos = args.forcepos
+forcepsf = args.forcepsf
+astrometry = args.astrometry
 
 ims = [i for i in args.file_to_reduce]
 
@@ -982,6 +992,16 @@ for f in usedfilters:
                 print('\nCleaning cosmics...')
                 data, cosmicmask = lacosmic(data)
                 print('Done')
+                
+                
+            if astrometry == True:
+                print('\nAttempting astrometry solve...')
+                try:
+                    ast = AstrometryNet()
+                    wcs_header = ast.solve_from_image(image,detect_threshold=30)
+                    # Apply wcs...
+                except:
+                    print('Astrometry failed')
 
             # Set up sequence stars, initial steps
             
@@ -2149,7 +2169,7 @@ for f in usedfilters:
 
             SNco_new = [0,0]
             SNco_new[0],SNco_new[1] = photutils.centroids.centroid_sources(data,SNco[0],SNco[1],
-                                         centroid_func=photutils.centroids.centroid_2dg,box_size=3)
+                                         centroid_func=photutils.centroids.centroid_2dg)
             SNco = [SNco_new[0][0],SNco_new[1][0]]
 
             plt.figure(1)
@@ -2182,7 +2202,7 @@ for f in usedfilters:
 
             plt.draw()
 
-            if quiet == False:
+            if quiet == False and forcepos == False:
                 like_pos = input('\nHappy with centroiding position? [y] ')
                 if not like_pos: like_pos = 'y'
                 if like_pos in ('n','no'):
@@ -2256,7 +2276,7 @@ for f in usedfilters:
 
 
 
-            if not forcepos:
+            if forcepsf == True:
                 epsf.x_0.fixed = True
                 epsf.y_0.fixed = True
 
