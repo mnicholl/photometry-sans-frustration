@@ -135,7 +135,7 @@ parser.add_argument('--magmax', dest='magmax', default=16, type=float,
 parser.add_argument('--queryrad', dest='queryrad', default=5, type=float,
                     help='Search radius in arcmins for PS1/SDSS sequence stars')
 
-parser.add_argument('--templatesize', dest='templatesize', default=5, type=float,
+parser.add_argument('--templatesize', dest='templatesize', default=10, type=float,
                     help='Size of PS1 cutouts in arcmins')
 
 parser.add_argument('--shifts', dest='shifts', default=False, action='store_true',
@@ -285,7 +285,7 @@ if len(ims) == 0:
 
 def PS1catalog(ra,dec,magmin=25,magmax=8,queryrad=5):
 
-    queryurl = 'https://catalogs.mast.stsci.edu/api/v0.1/panstarrs/dr2/stack?'
+    queryurl = 'https://catalogs.mast.stsci.edu/api/v0.1/panstarrs/dr2/stack.json?'
     queryurl += 'ra='+str(ra)
     queryurl += '&dec='+str(dec)
     queryurl += '&radius='+str(queryrad/60.)
@@ -394,7 +394,7 @@ def SDSScutouts(ra,dec,filt):
     pos = coords.SkyCoord(str(ra)+' '+str(dec), unit='deg', frame='icrs')
     
     try:
-        xid = SDSS.query_region(pos)
+        xid = SDSS.query_region(pos,data_release=16)
         if len(xid)>1:
             xid.remove_rows(slice(1,len(xid)))
             
@@ -420,7 +420,7 @@ def SDSScatalog(ra,dec,magmin=25,magmax=8,queryrad=5):
 
     pos = coords.SkyCoord(str(ra)+' '+str(dec), unit='deg', frame='icrs')
     
-    data = SDSS.query_region(pos,radius=str(queryrad/60.)+'d',fields=('ra','dec','u','g','r','i','z','type'))
+    data = SDSS.query_region(pos,radius=str(queryrad/60.)+'d',photoobj_fields=('ra','dec','u','g','r','i','z','type'))
     
     data = data[data['type'] == 6]
 
@@ -522,8 +522,10 @@ outdir = 'PSF_output'
 
 if not os.path.exists(outdir): os.makedirs(outdir)
 
+start_time = str(int(time.time()))
+
 # A file to write final magnitudes
-results_filename = os.path.join(outdir,'PSF_phot_'+str(int(time.time()))+'.txt')
+results_filename = os.path.join(outdir,'PSF_phot_'+start_time+'.txt')
 outFile = open(results_filename,'w')
 outFile.write('#image\ttarget\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tap_limit\tZP\terr\ttemplate\tcomments')
 
@@ -1011,6 +1013,8 @@ for f in usedfilters:
 
                     for i in wcs_header.cards:
                         header.set(i[0],i[1],i[2])
+                        
+                    print('\n')
 
                 except:
                     print('Astrometry failed')
@@ -2453,7 +2457,7 @@ for f in usedfilters:
 
             outFile.write('\n'+image+'\t%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP_psf,errZP_psf,template,comment))
             
-            fig_filename = os.path.join(outdir,'PSF_phot_'+str(int(time.time()))+'_'+image+'.pdf')
+            fig_filename = os.path.join(outdir, image+'_'+start_time+'.pdf')
 
             plt.savefig(fig_filename)
 
