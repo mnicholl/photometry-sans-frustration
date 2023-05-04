@@ -5,15 +5,16 @@ Interactive python wrapper for point-spread fitting (PSF) photometry using Astro
 To run: 
     python psf.py [--options]
 
-Required inputs: 
+Required inputs (see example directory): 
 
   1. transient coordinates, either by -c [RA DEC] or a 1 line, 2-column tab-separated text file ending in '_coords.txt'. RA and Dec should be in decimal degrees
 
-  2. list of coordinates of nearby stars (with magnitudes if zero point is required). This is in a file ending '_seq.txt'. If no sequence star file is provided, code will attempt to generate one automatically by querying catalogs (currently using PanSTARRS and SDSS). The format is: 
+  2. list of coordinates of nearby stars (with magnitudes if zero point is required). This is in a file ending '_seq.txt'. If no sequence star file is provided, code will attempt to generate one automatically by querying catalogs (currently using PanSTARRS, SDSS, 2MASS). The format is: 
       
     ra dec g r i z
 
     336.7148649 17.1512778 19.188 18.454 18.153 18.031
+    ...
 
 Results will be saved in a directory called 'PSF_output' using a text file with a unique timestamp.
 
@@ -24,9 +25,11 @@ Specifying data / workflow:
 
   -i IMAGES : specify images to analyse (accepts wildcards). Otherwise runs on all fits images in directory
   
-  -b BAND : specify bands to analyse (e.g. only use g band images)
+  -b BAND : include only images in given band(s) (e.g. '-b g r' will only use g and r images)
   
   --quiet : no user prompts, run in the background
+
+  --savefigs : save plots (one per image, showing background, PSF, zeropoint)
   
   --force : do not allow re-centroiding when performing final PSF fit to transient (generally not needed but useful if there is a bright nearby source or you have an exact position)
   
@@ -42,18 +45,9 @@ Pre-processing:
   --overwrite-stacks : if not given and stacks already exist for desired band and time, will use those rather than making new ones
   
   
-Image subtraction:
-  
-  --sub : perform template subtraction. Will subtract a local image called 'template_[band].fits' if it exists, otherwise will try to create one from PS1/SDSS
-  
-  --templatesize N: size of PS1/SDSS cutout to download in arcmin (default 5 arcmin)
-  
-  --cutoutsize : size of image to cutout for template subtraction in pixels
-  
-
 Calibration
 
-  --queryrad N: area to search for sequence stars in PS1/SDSS (default 5 arcmin)
+  --queryrad N: radius to search for sequence stars in PS1/SDSS/2MASS (default 5 arcmin)
  
   --magmin / magmax MAG : faintest / brightest sequence stars to include in zero point calculation
   
@@ -61,4 +55,15 @@ Calibration
   
   --apfrac N.N : fraction of the PSF flux to include when calculating optimal aperture size (default is to use an aperture that captures 90% of PSF flux)
   
-  --fwhm N : for instances where too few stars to build a PSF, give the FWHM in pixels to use for a simple Gaussian model
+  --fwhm N : for instances where too few stars to build a PSF, give the default FWHM in pixels to use for a simple Gaussian model
+
+
+Image subtraction:
+  
+  --sub : perform template subtraction. Will subtract a local image called 'template_[band].fits' if it exists, otherwise will try to create one from PS1/SDSS
+  
+  --templatesize N: side length of PS1/SDSS cutout to download, in arcmin (default 10 arcmin)
+  
+  --cutoutsize : size of image to cutout for template subtraction, in pixels (default 1000)
+  
+

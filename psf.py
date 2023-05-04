@@ -210,6 +210,9 @@ parser.add_argument('--forcepsf', dest='forcepsf', default=False, action='store_
 parser.add_argument('--astrometry', dest='astrometry', default=False, action='store_true',
                     help='Attempt WCS calibration with astrometry.net')
 
+parser.add_argument('--savefigs', dest='savefigs', default=False, action='store_true',
+                    help='Save output figures')
+
 
 args = parser.parse_args()
 
@@ -247,6 +250,7 @@ keep = args.keep
 forcepos = args.forcepos
 forcepsf = args.forcepsf
 astrometry = args.astrometry
+savefigs = args.savefigs
 
 ims = [i for i in args.file_to_reduce]
 
@@ -489,6 +493,9 @@ def TWOMASScatalog(ra,dec,magmin=25,magmax=8,queryrad=5):
     data['ra','dec','J','H','K'].write('2MASS_seq.txt',format='ascii',overwrite=True, delimiter='\t')
     
     print('Success! Sequence star file created: 2MASS_seq.txt')
+
+
+## NEED TO ADD 2MASS IMAGE SEARCH!
 
 
 # Try to match header keyword to a known filter automatically:
@@ -2049,11 +2056,11 @@ for f in usedfilters:
                             if not cutoutsize1: cutoutsize1 = cutoutsize_new
                             cutoutsize_new = int(cutoutsize1)
             
-                            tmpl_sat1 = input('Try lower template saturation? ['+str(tmpl_sat_new)+']')
+                            tmpl_sat1 = input('Try different template saturation? ['+str(tmpl_sat_new)+']')
                             if not tmpl_sat1: tmpl_sat1 = tmpl_sat_new
                             tmpl_sat_new = int(tmpl_sat1)
             
-                            sci_sat1 = input('Try lower science saturation? ['+str(sci_sat_new)+']')
+                            sci_sat1 = input('Try different science saturation? ['+str(sci_sat_new)+']')
                             if not sci_sat1: sci_sat1 = sci_sat_new
                             sci_sat_new = int(sci_sat1)
                             
@@ -2135,11 +2142,11 @@ for f in usedfilters:
                                 cutoutsize_new = min(data_orig.shape)-1
                             cutoutsize_new = int(cutoutsize1)
             
-                            tmpl_sat1 = input('Try lower template saturation? ['+str(tmpl_sat_new)+']')
+                            tmpl_sat1 = input('Try different template saturation? ['+str(tmpl_sat_new)+']')
                             if not tmpl_sat1: tmpl_sat1 = tmpl_sat_new
                             tmpl_sat_new = int(tmpl_sat1)
             
-                            sci_sat1 = input('Try lower science saturation? ['+str(sci_sat_new)+']')
+                            sci_sat1 = input('Try different science saturation? ['+str(sci_sat_new)+']')
                             if not sci_sat1: sci_sat1 = sci_sat_new
                             sci_sat_new = int(sci_sat1)
                             
@@ -2459,7 +2466,8 @@ for f in usedfilters:
             
             fig_filename = os.path.join(outdir, image+'_'+start_time+'.pdf')
 
-            plt.savefig(fig_filename)
+            if savefigs:
+                plt.savefig(fig_filename)
 
 
         except Exception as e:
