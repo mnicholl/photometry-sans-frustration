@@ -1,5 +1,7 @@
 # photometry-sans-frustration (psf)
 
+[![DOI](https://zenodo.org/badge/161163856.svg)](https://zenodo.org/badge/latestdoi/161163856)
+
 Interactive python wrapper for point-spread fitting (PSF) photometry using Astropy/photutils. Full python (including all dependencies)
 
 To run: 
