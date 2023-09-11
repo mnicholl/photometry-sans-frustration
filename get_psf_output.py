@@ -10,7 +10,7 @@ import os
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--save','-s', dest='save', default=False, action='store_true',
-                    help='save light curve to single json')
+                    help='save light curve')
 
 args = parser.parse_args()
 
@@ -57,7 +57,7 @@ for i in datfiles:
             else:
                 band = data[2]
                 if band not in phot:
-                    phot[band] = {'mjd': [], 'BESTmag': [], 'BESTerr': [], 'PSFmag': [], 'PSFerr': [], 'ApOptmag': [],  'ApOpterr': [], 'ApBigmag': [], 'ApBigerr': [] }
+                    phot[band] = {'mjd': [], 'BESTmag': [], 'BESTerr': [], 'PSFmag': [], 'PSFerr': [], 'ApOptmag': [],  'ApOpterr': [], 'ApBigmag': [], 'ApBigerr': [], 'Limit': []}
                 phot[band]['mjd'].append(float(data[3]))
                 phot[band]['PSFmag'].append(float(data[4]))
                 phot[band]['PSFerr'].append(float(data[5]))
@@ -65,6 +65,7 @@ for i in datfiles:
                 phot[band]['ApOpterr'].append(float(data[7]))
                 phot[band]['ApBigmag'].append(float(data[8]))
                 phot[band]['ApBigerr'].append(float(data[9]))
+                phot[band]['Limit'].append(float(data[10]))
                 if float(data[5])<=float(data[7])+0.05:
                     phot[band]['BESTmag'].append(float(data[4]))
                     phot[band]['BESTerr'].append(float(data[5]))
@@ -106,19 +107,31 @@ plt.show()
 if save:
     json.dump(phot, open('PSF_lightcurve_'+str(len(glob.glob('PSF_lightcurve*.txt')))+'.json','w'))
     
-    outfile = 'PSF_lightcurve_'
+    outfile = 'PSF_lightcurve_detailed_'
+    
+    outfile2 = 'PSF_lightcurve_best_'
     
     for i in labels:
         outfile += i
-        
+        outfile2 += i
+
     outfile += '.txt'
-    
+    outfile2 += '.txt'
+
     f = open(outfile,'w')
-    
+    f2 = open(outfile2,'w')
+
     f.write('#MJD\tMag\terr\tPSF\terr\tOptAp\terr\tBigAp\terr\tband\n')
+    f2.write('#mjg,mag,e_mag,band,telescope,limit\n')
 
     for i in labels:
         for j in range(len(phot[i]['mjd'])):
             f.write('%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\n' %(phot[i]['mjd'][j], phot[i]['BESTmag'][j], phot[i]['BESTerr'][j], phot[i]['PSFmag'][j], phot[i]['PSFerr'][j], phot[i]['ApOptmag'][j], phot[i]['ApOpterr'][j], phot[i]['ApBigmag'][j], phot[i]['ApBigerr'][j], i))
+            
+            if phot[i]['BESTmag'][j] > phot[i]['Limit'][j] + 1 or np.isnan(phot[i]['BESTmag'][j]) or phot[i]['BESTerr'][j] > 0.6:
+                f2.write('%.2f,%.2f,,%s,,true\n' %(phot[i]['mjd'][j], phot[i]['Limit'][j], i))
+            else:
+                f2.write('%.2f,%.2f,%.2f,%s,,false\n' %(phot[i]['mjd'][j], phot[i]['BESTmag'][j], phot[i]['BESTerr'][j], i))
 
     f.close()
+    f2.close()
