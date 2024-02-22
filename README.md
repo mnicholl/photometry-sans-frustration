@@ -64,8 +64,10 @@ Image subtraction:
   
   --sub : perform template subtraction. Will subtract a local image called 'template_[band].fits' if it exists, otherwise will try to create one from PS1/SDSS
   
+  --template: if provided with a filename, uses specified file rather than the default template image above
+  
   --templatesize N: side length of PS1/SDSS cutout to download, in arcmin (default 10 arcmin)
   
-  --cutoutsize : size of image to cutout for template subtraction, in pixels (default 1000)
+  --cutoutsize : size of image to cutout for template subtraction, in pixels (default 1000). Provide two numbers to give separate x, y lengths for rectangular stamps
   
 
