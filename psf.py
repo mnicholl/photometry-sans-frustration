@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 
-version = '1.6'
+version = '1.7'
 
 '''
     PSF: PHOTOMETRY SANS FRUSTRATION
 
-    Written by Matt Nicholl, 2015-2023
+    Written by Matt Nicholl, 2015-2024
 
     Requirements:
 
@@ -94,6 +94,7 @@ import wget
 from astroquery.astrometry_net import AstrometryNet
 from astropy.stats import sigma_clipped_stats
 from photutils.detection import find_peaks
+from photutils.background import LocalBackground, MMMBackground
 
 
 def handler(signum, frame):
@@ -186,10 +187,13 @@ parser.add_argument('--clean', dest='clean', default=False, action='store_true',
 parser.add_argument('--sub', dest='sub', default=False, action='store_true',
                     help='Subtract template images')
 
+parser.add_argument('--use-template', dest='use_template', default=None, type=str,
+                    help='Specify template image to use for subtraction')
+
 parser.add_argument('--noalign', dest='noalign', default=False, action='store_true',
                     help='Do not align template to image (use if already aligned)')
 
-parser.add_argument('--cutoutsize', dest='cut', default=1000, type=int,
+parser.add_argument('--cutoutsize', dest='cut', default=1000, type=int, nargs='+',
                     help='Cutout size for image subtraction')
 
 parser.add_argument('--sci-sat', dest='sci_sat', default=35000, type=int,
@@ -209,6 +213,9 @@ parser.add_argument('--forcepsf', dest='forcepsf', default=False, action='store_
 
 parser.add_argument('--astrometry', dest='astrometry', default=False, action='store_true',
                     help='Attempt WCS calibration with astrometry.net')
+
+parser.add_argument('--pix-scale', dest='pix_scale', default=None, type=float,
+                    help='Pixel scale of image (optional) for astrometry')
 
 parser.add_argument('--savefigs', dest='savefigs', default=False, action='store_true',
                     help='Save output figures')
@@ -242,7 +249,12 @@ timebins = args.bin
 overwrite_stacks = args.overwrite
 clean = args.clean
 sub = args.sub
-cutoutsize = args.cut
+template_spec = args.use_template
+cutoutsize_x = args.cut[0]
+if len(args.cut) > 1:
+    cutoutsize_y = args.cut[1]
+else:
+    cutoutsize_y = cutoutsize_x
 noalign = args.noalign
 tmpl_sat = args.tmpl_sat
 sci_sat = args.sci_sat
@@ -250,6 +262,7 @@ keep = args.keep
 forcepos = args.forcepos
 forcepsf = args.forcepsf
 astrometry = args.astrometry
+pix_scale = args.pix_scale
 savefigs = args.savefigs
 
 ims = [i for i in args.file_to_reduce]
@@ -257,6 +270,8 @@ ims = [i for i in args.file_to_reduce]
 bands = [i for i in args.bands]
 
 local_template_list = glob.glob('template_*.fits')
+if template_spec:
+    local_template_list.append(template_spec)
 
 coords1 = [i for i in args.coords]
 
@@ -331,7 +346,7 @@ def PS1catalog(ra,dec,magmin=25,magmax=8,queryrad=5):
                         used.append(k)
 
 
-        np.savetxt('PS1_seq.txt',data2,fmt='%.8f\t%.8f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f', header='ra\tdec\tg\tr\ti\tz\ty',comments='')
+        np.savetxt('PS1_seq.txt',data2,fmt='%.8f\t%.8f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f', header='ra\tdec\tg\tr\ti\tz\ty',comments='')
 
         print('Success! Sequence star file created: PS1_seq.txt')
 
@@ -534,7 +549,7 @@ start_time = str(int(time.time()))
 # A file to write final magnitudes
 results_filename = os.path.join(outdir,'PSF_phot_'+start_time+'.txt')
 outFile = open(results_filename,'w')
-outFile.write('#image\ttarget\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tap_limit\tZP\terr\ttemplate\tcomments')
+outFile.write('#image\ttarget\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tap_limit\tZP\terr\tflux\terr\ttemplate\tcomments')
 
 
 
@@ -636,15 +651,20 @@ for image in ims:
                         jd = fits.getval(image,'JD')
                         mjd = jd - 2400000.5
                     except:
-                        mjd = input('No MJD found, please enter: [99999] ')
-                        if not mjd: mjd = 99999
+                        try:
+                            mjd = fits.getval(image,'MJDUTC')
+                        except:
+                            mjd = input('No MJD found, please enter: [99999] ')
+                            if not mjd: mjd = 99999
 
         mjd = float(mjd)
 
         template = ''
 
         if sub==True:
-            if os.path.exists('template_'+filtername+'.fits'):
+            if template_spec and os.path.exists(template_spec):
+                template = template_spec
+            elif os.path.exists('template_'+filtername+'.fits'):
                 template = 'template_'+filtername+'.fits'
             elif os.path.exists('../template_'+filtername+'.fits'):
                 template = '../template_'+filtername+'.fits'
@@ -838,7 +858,7 @@ for f in usedfilters:
             time_in_range = (ims1[:,2].astype(float)>=binedges[bin])&(ims1[:,2].astype(float)<binedges[bin+1])
             stacktab = ims1[time_in_range]
             mjdstack = np.mean(stacktab[:,2].astype(float))
-            stackname = 'stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits'
+            stackname = 'stack_'+str(np.round(mjdstack,4))+'_'+f+'.fits'
             if len(stacktab) > 0:
                 go_on = False
                 if overwrite_stacks == False:
@@ -897,13 +917,13 @@ for f in usedfilters:
                         stackheader['MJD'] = mjdstack
                         stackheader['MJD-OBS'] = mjdstack
 
-                        fits.writeto('stack_'+str(np.round(mjdstack,2))+'_'+f+'.fits',
+                        fits.writeto('stack_'+str(np.round(mjdstack,4))+'_'+f+'.fits',
                                 stacked_data,header=stackheader,
                                 overwrite=True)
                         
                         ims2.append(stackname)
                         
-                        print('Stack done: ' + str(np.round(mjdstack,2)))
+                        print('Stack done: ' + str(np.round(mjdstack,4)))
                         
                         if sub == True and has_template == True:
                             filtertab2.append([stackname, filtername, mjdstack, template])
@@ -1016,15 +1036,23 @@ for f in usedfilters:
                     sources.reverse()
 
                     ast = AstrometryNet()
-                    wcs_header = ast.solve_from_source_list(sources['x_peak'][:100], sources['y_peak'][:100], solve_timeout=600, center_ra=RAdec[0], center_dec=RAdec[1], radius=0.2, parity=2, image_width=header['NAXIS1'], image_height=header['NAXIS2'])
+                    
+                    if pix_scale:
+                        wcs_header = ast.solve_from_source_list(sources['x_peak'][:100], sources['y_peak'][:100], solve_timeout=600, center_ra=RAdec[0], center_dec=RAdec[1], radius=0.2, parity=2, image_width=header['NAXIS1'], image_height=header['NAXIS2'], scale_units='arcsecperpix', scale_est=pix_scale, scale_err = 0.1)
+                    else:
+                        wcs_header = ast.solve_from_source_list(sources['x_peak'][:100], sources['y_peak'][:100], solve_timeout=600, center_ra=RAdec[0], center_dec=RAdec[1], radius=0.2, parity=2, image_width=header['NAXIS1'], image_height=header['NAXIS2'])
+
 
                     for i in wcs_header.cards:
-                        header.set(i[0],i[1],i[2])
+#                        if i[0] in ['CRVAL1','CRVAL2','CRPIX1','CRPIX2','CUNIT1','CUNIT2','CD1_1','CD1_2','CD2_1','CD2_2']:
+                        if i[0] != 'NAXIS':
+                            header.set(i[0],i[1],i[2])
                         
                     print('\n')
 
                 except:
                     print('Astrometry failed')
+                    print('Try providing pixel scale with --pix-scale')
                     print('If API key error, you probably need to edit astroquery config')
                     print('See: https://astroquery.readthedocs.io/en/latest/astrometry_net/astrometry_net.html')
 
@@ -1506,7 +1534,7 @@ for f in usedfilters:
                     zp1 = np.nanmedian(zpList1)
                     errzp1 = np.nanstd(zpList1)
 
-                    print('\nInitial zeropoint =  %.2f +/- %.2f\n' %(zp1,errzp1))
+                    print('\nInitial zeropoint =  %.3f +/- %.3f\n' %(zp1,errzp1))
                     print('Checking for bad stars...')
 
                     if len(seqIm) > 10:
@@ -1593,9 +1621,9 @@ for f in usedfilters:
                     errZP_ap = np.std(zpList)#/np.sqrt(len(zpList))
 
 
-                    print('\nPSF Zeropoint = %.2f +/- %.2f' %(ZP_psf,errZP_psf))
-                    print('Big aperture Zeropoint = %.2f +/- %.2f' %(ZP_ap,errZP_ap))
-                    print('Optimal aperture Zeropoint = %.2f +/- %.2f' %(ZP_opt,errZP_opt))
+                    print('\nPSF Zeropoint = %.3f +/- %.3f' %(ZP_psf,errZP_psf))
+                    print('Big aperture Zeropoint = %.3f +/- %.3f' %(ZP_ap,errZP_ap))
+                    print('Optimal aperture Zeropoint = %.3f +/- %.3f' %(ZP_opt,errZP_opt))
 
                     
                     if not quiet:
@@ -1670,27 +1698,6 @@ for f in usedfilters:
                         tmp = tmp[1]
 
 
-
-
-                    ### Old method -- try using Astroalign first
-
-#                    try:
-#                        im_fixed = np.array(data, dtype="<f4")
-#                        tmp_fixed = np.array(data2, dtype="<f4")
-#
-#                        registered, footprint = aa.register(tmp_fixed, im_fixed)
-#
-#                        tmp_masked = np.ma.masked_array(registered, footprint, fill_value=np.nanmedian(tmp_fixed)).filled()
-#
-#                        tmp_masked[np.isnan(tmp_masked)] = np.nanmedian(tmp_fixed)
-#
-#                        hdu2 = fits.PrimaryHDU(tmp_masked)
-#
-#                        hdu2.writeto('tmpl_aligned.fits',overwrite=True)
-#
-#                    except:
-#
-#                        print('Astroalign failed to match images, trying Reproject')
                     
                     
                     # New method: reproject first, then try astroalign
@@ -1985,11 +1992,18 @@ for f in usedfilters:
                 im_sci.data = data_orig
                 im_sci.header = header_orig
 
-                cutoutsize_new = cutoutsize
-                if f == 'u' and cutoutsize < 1600:
-                    cutoutsize_new = 1600
-                if cutoutsize_new > min(data_orig.shape):
-                    cutoutsize_new = min(data_orig.shape)-1
+                cutoutsize_x_new = cutoutsize_x
+                cutoutsize_y_new = cutoutsize_y
+                if f == 'u' and cutoutsize_x < 1600:
+                    cutoutsize_x_new = 1600
+                if f == 'u' and cutoutsize_y < 1600:
+                    cutoutsize_y_new = 1600
+                    
+                # Replace this with some logic to test if SN within x,y pixels of nearest edge!
+                if cutoutsize_x_new > min(SNco[0],data_orig.shape[1]-SNco[0]):
+                    cutoutsize_x_new = min(SNco[0],data_orig.shape[1]-SNco[0])-1
+                if cutoutsize_y_new > min(SNco[1],data_orig.shape[0]-SNco[1]):
+                    cutoutsize_y_new = min(SNco[1],data_orig.shape[0]-SNco[1])-1
 
                 
                 im2 = fits.open('tmpl_aligned.fits')
@@ -2015,18 +2029,23 @@ for f in usedfilters:
 
                     wcs = astropy.wcs.WCS(header_orig)
                     
-                    if cutoutsize_new > min(data_orig.shape):
-                        cutoutsize_new = min(data_orig.shape)-1
+                    if cutoutsize_x_new > min(SNco[0],data_orig.shape[1]-SNco[0]):
+                        cutoutsize_x_new = min(SNco[0],data_orig.shape[1]-SNco[0])-1
+                    if cutoutsize_y_new > min(SNco[1],data_orig.shape[0]-SNco[1]):
+                        cutoutsize_y_new = min(SNco[1],data_orig.shape[0]-SNco[1])-1
 
 
-                    cutout = Cutout2D(data_orig, position=SNco, size=(cutoutsize_new,cutoutsize_new), wcs=wcs)
+                    cutout = Cutout2D(data_orig, position=SNco, size=(cutoutsize_y_new,cutoutsize_x_new), wcs=wcs)
 
                     im_sci.data = cutout.data
                     im_sci.header.update(cutout.wcs.to_header())
+                    if astrometry == True:
+                        im_sci.header.set('CTYPE1','RA---TAN-SIP')
+                        im_sci.header.set('CTYPE2','DEC--TAN-SIP')
                     im_sci.writeto('sci_trim.fits', overwrite=True)
 
 
-                    cutout2 = Cutout2D(data2, position=SNco, size=(cutoutsize_new,cutoutsize_new), wcs=wcs)
+                    cutout2 = Cutout2D(data2, position=SNco, size=(cutoutsize_y_new,cutoutsize_x_new), wcs=wcs)
 
                     im2.data = cutout2.data
                     im2.header.update(cutout2.wcs.to_header())
@@ -2037,7 +2056,7 @@ for f in usedfilters:
 
                     try:
                         im_sub = run_subtraction('sci_trim.fits','tmpl_trim.fits','sci_psf.fits',
-                        'tmpl_psf.fits',normalization='science',n_stamps=8,science_saturation=sci_sat_new, reference_saturation=tmpl_sat_new)
+                        'tmpl_psf.fits',normalization='science',n_stamps=1,science_saturation=sci_sat_new, reference_saturation=tmpl_sat_new)
                                             
                     except:
                         if not quiet:
@@ -2052,15 +2071,22 @@ for f in usedfilters:
                                 do_sub = False
                                 break
             
-                            cutoutsize1 = input('Try different cutout size? ['+str(cutoutsize_new)+']')
-                            if not cutoutsize1: cutoutsize1 = cutoutsize_new
-                            cutoutsize_new = int(cutoutsize1)
+                            cutoutsize1 = input('Try different cutout size? - enter x or x,y ['+str(cutoutsize_x_new)+','+str(cutoutsize_y_new)+'] ')
+                            if not cutoutsize1:
+                                pass
+                            else:
+                                cutoutsize_x_new = int(cutoutsize1.split(',')[0])
+                                if len(cutoutsize1.split(',')) > 1:
+                                    cutoutsize_y_new = int(cutoutsize1.split(',')[1])
+                                else:
+                                    cutoutsize_y_new = cutoutsize_x_new
+
             
-                            tmpl_sat1 = input('Try different template saturation? ['+str(tmpl_sat_new)+']')
+                            tmpl_sat1 = input('Try different template saturation? ['+str(tmpl_sat_new)+'] ')
                             if not tmpl_sat1: tmpl_sat1 = tmpl_sat_new
                             tmpl_sat_new = int(tmpl_sat1)
             
-                            sci_sat1 = input('Try different science saturation? ['+str(sci_sat_new)+']')
+                            sci_sat1 = input('Try different science saturation? ['+str(sci_sat_new)+'] ')
                             if not sci_sat1: sci_sat1 = sci_sat_new
                             sci_sat_new = int(sci_sat1)
                             
@@ -2083,7 +2109,7 @@ for f in usedfilters:
                     try:
                         bkg_new = photutils.background.Background2D(data_sub,box_size=bkgbox)
                     except:
-                        bkg_new = photutils.background.Background2D(data_sub,box_size=int(cutoutsize_new/4),exclude_percentile=0)
+                        bkg_new = photutils.background.Background2D(data_sub,box_size=int(cutoutsize_x_new/4),exclude_percentile=0)
 
                     
                     bkg_new_error = bkg_new.background_rms
@@ -2098,7 +2124,7 @@ for f in usedfilters:
                                 vmin=visualization.ZScaleInterval().get_limits(data_sub)[0],
                                 vmax=visualization.ZScaleInterval().get_limits(data_sub)[1])
                                 
-                    ax1.errorbar(co[:,0]-(SNco[0]-cutoutsize_new/2.),co[:,1]-(SNco[1]-cutoutsize_new/2.), fmt='s',mfc='none',markeredgecolor='C0',markersize=8,markeredgewidth=1.5)
+                    ax1.errorbar(co[:,0]-(SNco[0]-cutoutsize_x_new/2.),co[:,1]-(SNco[1]-cutoutsize_y_new/2.), fmt='s',mfc='none',markeredgecolor='C0',markersize=8,markeredgewidth=1.5)
 
 
 
@@ -2112,7 +2138,7 @@ for f in usedfilters:
 
                     
 
-                    ax1.errorbar(cutoutsize_new/2.,cutoutsize_new/2.,fmt='o',markeredgecolor='r',mfc='none',
+                    ax1.errorbar(cutoutsize_x_new/2.,cutoutsize_y_new/2.,fmt='o',markeredgecolor='r',mfc='none',
                                     markeredgewidth=3,markersize=20)
                                     
                     
@@ -2136,12 +2162,16 @@ for f in usedfilters:
             
                                 break
 
-                            cutoutsize1 = input('Try different cutout size? ['+str(cutoutsize_new)+']')
-                            if not cutoutsize1: cutoutsize1 = cutoutsize_new
-                            if cutoutsize_new > min(data_orig.shape):
-                                cutoutsize_new = min(data_orig.shape)-1
-                            cutoutsize_new = int(cutoutsize1)
-            
+                            cutoutsize1 = input('Try different cutout size? - enter x or x,y ['+str(cutoutsize_x_new)+','+str(cutoutsize_y_new)+'] ')
+                            if not cutoutsize1:
+                                pass
+                            else:
+                                cutoutsize_x_new = int(cutoutsize1.split(',')[0])
+                                if len(cutoutsize1.split(',')) > 1:
+                                    cutoutsize_y_new = int(cutoutsize1.split(',')[1])
+                                else:
+                                    cutoutsize_y_new = cutoutsize_x_new
+
                             tmpl_sat1 = input('Try different template saturation? ['+str(tmpl_sat_new)+']')
                             if not tmpl_sat1: tmpl_sat1 = tmpl_sat_new
                             tmpl_sat_new = int(tmpl_sat1)
@@ -2163,8 +2193,8 @@ for f in usedfilters:
                 if do_sub == True:
                     data = data_sub
                     bkg_error = bkg_new_error
-                    SNco[0] = cutoutsize_new/2.
-                    SNco[1] = cutoutsize_new/2.
+                    SNco[0] = cutoutsize_x_new/2.
+                    SNco[1] = cutoutsize_y_new/2.
                 else:
                     plt.figure(1)
 
@@ -2304,6 +2334,9 @@ for f in usedfilters:
             if forcepsf == True:
                 epsf.x_0.fixed = True
                 epsf.y_0.fixed = True
+            else:
+                epsf.x_0.fixed = False
+                epsf.y_0.fixed = False
 
 
             # apertures
@@ -2340,14 +2373,15 @@ for f in usedfilters:
 
     #        epsf.x_0.fixed = True
     #        epsf.y_0.fixed = True
-            psfphot = photutils.psf.BasicPSFPhotometry(group_maker=grouper,
-                            bkg_estimator=photutils.background.MMMBackground(),
-                            psf_model=epsf, fitshape=fitrad,
-                            finder=None, aperture_radius=min(stamprad,2*aprad_opt))
+    
+            localbkg_estimator = LocalBackground(aprad, aprad+skyrad, MMMBackground())
+            psfphot = photutils.psf.PSFPhotometry(psf_model=epsf, fit_shape=fitrad,
+                            finder=None, aperture_radius=min(stamprad,2*aprad_opt),
+                            localbkg_estimator=localbkg_estimator)
 
-            SNpsfphotTab = psfphot.do_photometry(data, init_guesses=SNcoordTable)
+            SNpsfphotTab = psfphot(data, error=err_array, init_params=SNcoordTable)
 
-            SNpsfsubIm = psfphot.get_residual_image()
+            SNpsfsubIm = psfphot.make_residual_image(data, (2*(aprad+skyrad),2*(aprad+skyrad)))
 
             print('PSF done')
 
@@ -2402,7 +2436,7 @@ for f in usedfilters:
 
             try:
                 SNpsf = -2.5*np.log10(SNpsfphotTab['flux_fit'])
-                errSNpsf = abs(SNpsfphotTab['flux_unc']/SNpsfphotTab['flux_fit'])
+                errSNpsf = abs(SNpsfphotTab['flux_err']/SNpsfphotTab['flux_fit'])
             except:
                 SNpsf = np.nan
                 errSNpsf = np.nan
@@ -2450,10 +2484,22 @@ for f in usedfilters:
                 comment1 += ' instrumental mag only'
 
 
-            print('> PSF mag = %.2f +/- %.2f' %(calMagPsf,errMagPsf))
-            print('> Aperture mag (optimised aperture) = %.2f +/- %.2f' %(calMagAp_opt,errMagAp_opt))
-            print('> Aperture mag (big aperture) = %.2f +/- %.2f' %(calMagAp,errMagAp))
-            print('> Limiting mag (3 sigma, optimum ap) = %.2f' %(calMagLim))
+            print('> PSF mag = %.3f +/- %.3f' %(calMagPsf,errMagPsf))
+            print('> Aperture mag (optimised aperture) = %.3f +/- %.3f' %(calMagAp_opt,errMagAp_opt))
+            print('> Aperture mag (big aperture) = %.3f +/- %.3f' %(calMagAp,errMagAp))
+            print('> Limiting mag (3 sigma, optimum ap) = %.3f' %(calMagLim))
+            
+            
+            ## Output aperture flux:
+            
+            flux_ZP = 10**(-0.4*ZP_opt) * 3631 * 1e6 # uJy
+            
+            flux_ZP_err = np.log(10)/2.5 * errZP_opt * flux_ZP
+            
+            flux = flux_ZP * SNphotTab['aperture_opt_sum_sub']
+            
+            flux_err = np.sqrt((flux_ZP*SNphotTab['aperture_sum_err_0'])**2 + flux_ZP_err**2)
+            
 
             comment = ''
             if not quiet:
@@ -2462,7 +2508,7 @@ for f in usedfilters:
             if comment1:
                 comment += (' // '+comment1)
 
-            outFile.write('\n'+image+'\t%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP_psf,errZP_psf,template,comment))
+            outFile.write('\n'+image+'\t%s\t%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP_psf,errZP_psf,flux,flux_err,template,comment))
             
             fig_filename = os.path.join(outdir, image+'_'+start_time+'.pdf')
 
