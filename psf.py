@@ -1182,8 +1182,9 @@ for f in usedfilters:
             sig_x = np.nanstd(co[:,0]-orig_co[:,0])
             sig_y = np.nanstd(co[:,1]-orig_co[:,1])
             
-            SNco[0] += del_x
-            SNco[1] += del_y
+            if not forcepos:
+                SNco[0] += del_x
+                SNco[1] += del_y
 
 
             found = (abs(co[:,0]-orig_co[:,0])<max(abs(del_x)*10,5))&(abs(co[:,1]-orig_co[:,1])<max(abs(del_y)*10,5))
