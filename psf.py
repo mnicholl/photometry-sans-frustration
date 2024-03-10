@@ -193,7 +193,7 @@ parser.add_argument('--use-template', dest='use_template', default=None, type=st
 parser.add_argument('--noalign', dest='noalign', default=False, action='store_true',
                     help='Do not align template to image (use if already aligned)')
 
-parser.add_argument('--cutoutsize', dest='cut', default=1000, type=int, nargs='+',
+parser.add_argument('--cutoutsize', dest='cut', default=[1000], type=int, nargs='+',
                     help='Cutout size for image subtraction')
 
 parser.add_argument('--sci-sat', dest='sci_sat', default=35000, type=int,
@@ -215,7 +215,7 @@ parser.add_argument('--astrometry', dest='astrometry', default=False, action='st
                     help='Attempt WCS calibration with astrometry.net')
 
 parser.add_argument('--pix-scale', dest='pix_scale', default=None, type=float,
-                    help='Pixel scale of image (optional) for astrometry')
+                    help='Pixel scale of image (arcsec per pix) for astrometry (optional)')
 
 parser.add_argument('--savefigs', dest='savefigs', default=False, action='store_true',
                     help='Save output figures')
@@ -250,6 +250,7 @@ overwrite_stacks = args.overwrite
 clean = args.clean
 sub = args.sub
 template_spec = args.use_template
+print(args.cut)
 cutoutsize_x = args.cut[0]
 if len(args.cut) > 1:
     cutoutsize_y = args.cut[1]
@@ -549,7 +550,7 @@ start_time = str(int(time.time()))
 # A file to write final magnitudes
 results_filename = os.path.join(outdir,'PSF_phot_'+start_time+'.txt')
 outFile = open(results_filename,'w')
-outFile.write('#image\ttarget\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tap_limit\tZP\terr\tflux\terr\ttemplate\tcomments')
+outFile.write('#image\ttarget\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tap_limit\tZP\terr\tflux_opt\terr\tflux_big\terr\ttemplate\tcomments')
 
 
 
@@ -1026,7 +1027,7 @@ for f in usedfilters:
                 
                 
             if astrometry == True:
-                print('\nAttempting astrometry solve...')
+                print('\nAttempting astrometry solve (specify pixel scale with --pix-scale if slow)...')
                 try:
                     astmean, astmedian, aststd = sigma_clipped_stats(data, sigma=3.0)
                     astthreshold = astmedian + (5.0 * aststd)
@@ -2232,9 +2233,7 @@ for f in usedfilters:
             ax4 = plt.subplot2grid((2,5),(1,3))
 
 
-            ax4.imshow(data, origin='lower',cmap='gray',
-                        vmin=visualization.ZScaleInterval().get_limits(data)[0],
-                        vmax=visualization.ZScaleInterval().get_limits(data)[1])
+            ax4.imshow(data, origin='lower',cmap='gray', vmin=visualization.ZScaleInterval().get_limits(data[int(SNco[1])-(aprad+skyrad):int(SNco[1])+(aprad+skyrad), int(SNco[0])-(aprad+skyrad):int(SNco[0])+(aprad+skyrad)])[0],             vmax=visualization.ZScaleInterval().get_limits(data[int(SNco[1])-(aprad+skyrad):int(SNco[1])+(aprad+skyrad), int(SNco[0])-(aprad+skyrad):int(SNco[0])+(aprad+skyrad)])[1])
 
             ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
             ax4.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
@@ -2266,9 +2265,7 @@ for f in usedfilters:
                     
                     ax4.clear()
                     
-                    ax4.imshow(data, origin='lower',cmap='gray',
-                            vmin=visualization.ZScaleInterval().get_limits(data)[0],
-                            vmax=visualization.ZScaleInterval().get_limits(data)[1])
+                    ax4.imshow(data, origin='lower',cmap='gray', vmin=visualization.ZScaleInterval().get_limits(data[int(SNco[1])-(aprad+skyrad):int(SNco[1])+(aprad+skyrad), int(SNco[0])-(aprad+skyrad):int(SNco[0])+(aprad+skyrad)])[0],             vmax=visualization.ZScaleInterval().get_limits(data[int(SNco[1])-(aprad+skyrad):int(SNco[1])+(aprad+skyrad), int(SNco[0])-(aprad+skyrad):int(SNco[0])+(aprad+skyrad)])[1])
 
                     ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
                     ax4.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
@@ -2304,9 +2301,7 @@ for f in usedfilters:
                     
                     ax4.clear()
                     
-                    ax4.imshow(data, origin='lower',cmap='gray',
-                            vmin=visualization.ZScaleInterval().get_limits(data)[0],
-                            vmax=visualization.ZScaleInterval().get_limits(data)[1])
+                    ax4.imshow(data, origin='lower',cmap='gray', vmin=visualization.ZScaleInterval().get_limits(data[int(SNco[1])-(aprad+skyrad):int(SNco[1])+(aprad+skyrad), int(SNco[0])-(aprad+skyrad):int(SNco[0])+(aprad+skyrad)])[0],             vmax=visualization.ZScaleInterval().get_limits(data[int(SNco[1])-(aprad+skyrad):int(SNco[1])+(aprad+skyrad), int(SNco[0])-(aprad+skyrad):int(SNco[0])+(aprad+skyrad)])[1])
 
                     ax4.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
                     ax4.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
@@ -2387,10 +2382,7 @@ for f in usedfilters:
 
             ax5 = plt.subplot2grid((2,5),(1,4))
 
-            ax5.imshow(SNpsfsubIm, origin='lower',cmap='gray',
-                        vmin=visualization.ZScaleInterval().get_limits(data)[0],
-                        vmax=visualization.ZScaleInterval().get_limits(data)[1])
-
+            ax5.imshow(SNpsfsubIm, origin='lower',cmap='gray', vmin=visualization.ZScaleInterval().get_limits(data[int(SNco[1])-(aprad+skyrad):int(SNco[1])+(aprad+skyrad), int(SNco[0])-(aprad+skyrad):int(SNco[0])+(aprad+skyrad)])[0],             vmax=visualization.ZScaleInterval().get_limits(data[int(SNco[1])-(aprad+skyrad):int(SNco[1])+(aprad+skyrad), int(SNco[0])-(aprad+skyrad):int(SNco[0])+(aprad+skyrad)])[1])
 
             ax5.set_xlim(SNco[0]-(aprad+skyrad),SNco[0]+(aprad+skyrad))
             ax5.set_ylim(SNco[1]-(aprad+skyrad),SNco[1]+(aprad+skyrad))
@@ -2492,14 +2484,23 @@ for f in usedfilters:
             
             ## Output aperture flux:
             
-            flux_ZP = 10**(-0.4*ZP_opt) * 3631 * 1e6 # uJy
+            flux_ZP = 10**(-0.4*ZP_ap) * 3631 * 1e6 # uJy
             
-            flux_ZP_err = np.log(10)/2.5 * errZP_opt * flux_ZP
+            flux_ZP_err = np.log(10)/2.5 * errZP_ap * flux_ZP
             
-            flux = flux_ZP * SNphotTab['aperture_opt_sum_sub']
+            flux = flux_ZP * SNphotTab['aperture_sum_sub']
             
-            flux_err = np.sqrt((flux_ZP*SNphotTab['aperture_sum_err_0'])**2 + flux_ZP_err**2)
+            flux_err = flux * np.sqrt((flux_ZP_err/flux_ZP)**2 + (SNphotTab['aperture_sum_err_1']/SNphotTab['aperture_sum_sub'])**2)
+
+
+            flux_ZP_opt = 10**(-0.4*ZP_opt) * 3631 * 1e6 # uJy
             
+            flux_ZP_err_opt = np.log(10)/2.5 * errZP_opt * flux_ZP_opt
+            
+            flux_opt = flux_ZP_opt * SNphotTab['aperture_opt_sum_sub']
+            
+            flux_err_opt = flux_opt * np.sqrt((flux_ZP_err_opt/flux_ZP_opt)**2 + (SNphotTab['aperture_sum_err_0']/SNphotTab['aperture_opt_sum_sub'])**2)
+
 
             comment = ''
             if not quiet:
@@ -2508,7 +2509,7 @@ for f in usedfilters:
             if comment1:
                 comment += (' // '+comment1)
 
-            outFile.write('\n'+image+'\t%s\t%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP_psf,errZP_psf,flux,flux_err,template,comment))
+            outFile.write('\n'+image+'\t%s\t%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP_psf,errZP_psf,flux_opt,flux_err_opt,flux,flux_err,template,comment))
             
             fig_filename = os.path.join(outdir, image+'_'+start_time+'.pdf')
 
@@ -2522,7 +2523,7 @@ for f in usedfilters:
             print(e)
             print('Line number:')
             print(exc_tb.tb_lineno)
-            outFile.write('\n'+image+'\t\t\t\t\t\t\t\t\t\t\t\t\t\tFAILED')
+            outFile.write('\n'+image+'\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tFAILED')
             if not quiet:
                 next = input('\n> Press enter to continue to next image')
 
