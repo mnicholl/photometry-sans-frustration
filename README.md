@@ -4,6 +4,8 @@
 
 Interactive python wrapper for point-spread fitting (PSF) photometry using Astropy/photutils. Full python (including all dependencies)
 
+Please cite [Nicholl et al 2023](https://ui.adsabs.harvard.edu/abs/2023ApJ...954L..28N/abstract)
+
 To run: 
     python psf.py [--options]
 

@@ -295,6 +295,7 @@ if len(ims) == 0:
         if i in ims:
             ims.remove(i)
 
+ims.sort()
 
 
 ##################################################
@@ -2510,7 +2511,7 @@ for f in usedfilters:
             if comment1:
                 comment += (' // '+comment1)
 
-            outFile.write('\n'+image+'\t%s\t%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP_psf,errZP_psf,flux_opt,flux_err_opt,flux,flux_err,template,comment))
+            outFile.write('\n'+image+'\t%s\t%s\t%.5f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP_psf,errZP_psf,flux_opt,flux_err_opt,flux,flux_err,template,comment))
             
             fig_filename = os.path.join(outdir, image+'_'+start_time+'.pdf')
 
