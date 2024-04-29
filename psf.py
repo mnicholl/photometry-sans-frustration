@@ -551,7 +551,7 @@ start_time = str(int(time.time()))
 # A file to write final magnitudes
 results_filename = os.path.join(outdir,'PSF_phot_'+start_time+'.txt')
 outFile = open(results_filename,'w')
-outFile.write('#image\ttarget\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tap_limit\tZP\terr\tflux_opt\terr\tflux_big\terr\ttemplate\tcomments')
+outFile.write('#image\ttarget\tfilter\tmjd\tPSFmag\terr\tAp_opt\terr\tAp_big\terr\tap_limit\tZP\terr\tflux_opt\terr\tflux_big\terr\topt_rad\ttemplate\tcomments')
 
 
 
@@ -2511,7 +2511,7 @@ for f in usedfilters:
             if comment1:
                 comment += (' // '+comment1)
 
-            outFile.write('\n'+image+'\t%s\t%s\t%.5f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP_psf,errZP_psf,flux_opt,flux_err_opt,flux,flux_err,template,comment))
+            outFile.write('\n'+image+'\t%s\t%s\t%.5f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%s\t%s' %(target_name,f,mjd,calMagPsf,errMagPsf,calMagAp_opt,errMagAp_opt,calMagAp,errMagAp,calMagLim,ZP_psf,errZP_psf,flux_opt,flux_err_opt,flux,flux_err,aprad_opt,template,comment))
             
             fig_filename = os.path.join(outdir, image+'_'+start_time+'.pdf')
 
@@ -2525,7 +2525,7 @@ for f in usedfilters:
             print(e)
             print('Line number:')
             print(exc_tb.tb_lineno)
-            outFile.write('\n'+image+'\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tFAILED')
+            outFile.write('\n# '+image+'\tFAILED')
             if not quiet:
                 next = input('\n> Press enter to continue to next image')
 
