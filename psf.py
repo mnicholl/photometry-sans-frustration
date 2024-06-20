@@ -59,6 +59,7 @@ version = '1.7'
     '''
 
 import numpy as np
+import pandas as pd
 import glob
 import astropy
 import photutils
@@ -95,7 +96,8 @@ from astroquery.astrometry_net import AstrometryNet
 from astropy.stats import sigma_clipped_stats
 from photutils.detection import find_peaks
 from photutils.background import LocalBackground, MMMBackground
-
+from astroquery.vizier import Vizier
+from astropy.coordinates import SkyCoord
 
 def handler(signum, frame):
     res = input('\n > Paused. Do you want (c)ontinue, (q)uit and save, or (s)kip image? ')
@@ -514,6 +516,29 @@ def TWOMASScatalog(ra,dec,magmin=25,magmax=8,queryrad=5):
 
 ## NEED TO ADD 2MASS IMAGE SEARCH!
 
+def apass_catalog(ra,dec,magmin=25,magmax=8,queryrad=5):
+    # Using Vizier query
+    v = Vizier(columns=["RAJ2000", "DEJ2000", "Vmag", "Bmag"])
+    v.ROW_LIMIT = -1 
+
+    # Define the coordinates and search radius
+    coord = SkyCoord(ra=ra*u.deg, dec=dec*u.deg, frame='icrs')  # Example coordinates (RA, Dec) for M31
+    radius = queryrad * u.arcmin  # Search radius
+    result = v.query_region(coord, radius=radius, catalog="II/336/apass9")
+
+    # Check the result and convert to DataFrame
+    if result:
+        apass_data = result[0].to_pandas().dropna()  # Convert to Pandas DataFrame
+
+        # Remove sub-headers by renaming the columns
+        apass_data.columns = apass_data.columns.get_level_values(0)
+        apass_data.columns = ["ra", "dec", "V", "B"]
+        apass_data.to_csv('APASS_seq.txt',sep='\t', index = False)
+
+        return apass_data
+    else:
+        print("APASS query failed")
+
 
 # Try to match header keyword to a known filter automatically:
 
@@ -766,7 +791,7 @@ for f in usedfilters:
     elif len(suggSeq)>0:
         seqFile = suggSeq[0]
 
-    # if no sequence stars, download from PS1...
+    # if no sequence stars, download from PS1, SDSS, 2MASS or apass.
     if len(suggSeq)==0:
         if hasPS1 == True:
             print('Could not find sequence stars in this filter, but have PS1 for coordinates')
@@ -798,6 +823,14 @@ for f in usedfilters:
                 print('Found 2MASS stars')
             except:
                 print('2MASS query failed')
+        if f in ('B','V'):
+            try:
+                apass_catalog(RAdec[0],RAdec[1],queryrad=queryrad)
+                seqFile = 'APASS_seq.txt'
+                print('Found APASS stars')
+            except Exception as e:
+                print(e)
+                print('APASS query failed')
 
 
     print('\n####################\n\nSequence stars: '+seqFile)
@@ -2498,7 +2531,6 @@ for f in usedfilters:
             flux_ZP_opt = 10**(-0.4*ZP_opt) * 3631 * 1e6 # uJy
             
             flux_ZP_err_opt = np.log(10)/2.5 * errZP_opt * flux_ZP_opt
-            
             flux_opt = flux_ZP_opt * SNphotTab['aperture_opt_sum_sub']
             
             flux_err_opt = flux_opt * np.sqrt((flux_ZP_err_opt/flux_ZP_opt)**2 + (SNphotTab['aperture_sum_err_0']/SNphotTab['aperture_opt_sum_sub'])**2)
