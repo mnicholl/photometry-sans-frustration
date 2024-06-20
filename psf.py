@@ -517,20 +517,16 @@ def TWOMASScatalog(ra,dec,magmin=25,magmax=8,queryrad=5):
 ## NEED TO ADD 2MASS IMAGE SEARCH!
 
 def apass_catalog(ra,dec,magmin=25,magmax=8,queryrad=5):
-    # Using Vizier query
+    #Vizier
     v = Vizier(columns=["RAJ2000", "DEJ2000", "Vmag", "Bmag"])
     v.ROW_LIMIT = -1 
 
-    # Define the coordinates and search radius
-    coord = SkyCoord(ra=ra*u.deg, dec=dec*u.deg, frame='icrs')  # Example coordinates (RA, Dec) for M31
+    coord = SkyCoord(ra=ra*u.deg, dec=dec*u.deg, frame='icrs')
     radius = queryrad * u.arcmin  # Search radius
     result = v.query_region(coord, radius=radius, catalog="II/336/apass9")
 
-    # Check the result and convert to DataFrame
     if result:
-        apass_data = result[0].to_pandas().dropna()  # Convert to Pandas DataFrame
-
-        # Remove sub-headers by renaming the columns
+        apass_data = result[0].to_pandas().dropna()
         apass_data.columns = apass_data.columns.get_level_values(0)
         apass_data.columns = ["ra", "dec", "V", "B"]
         apass_data.to_csv('APASS_seq.txt',sep='\t', index = False)
@@ -793,6 +789,10 @@ for f in usedfilters:
 
     # if no sequence stars, download from PS1, SDSS, 2MASS or apass.
     if len(suggSeq)==0:
+
+        if f == 'U':
+            print('it is U band')
+
         if hasPS1 == True:
             print('Could not find sequence stars in this filter, but have PS1 for coordinates')
             seqFile = 'PS1_seq.txt'
@@ -824,6 +824,7 @@ for f in usedfilters:
             except:
                 print('2MASS query failed')
         if f in ('B','V'):
+            print(f'trying to fetch {f} band seq stars')
             try:
                 apass_catalog(RAdec[0],RAdec[1],queryrad=queryrad)
                 seqFile = 'APASS_seq.txt'
