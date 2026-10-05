@@ -2428,7 +2428,8 @@ for f in usedfilters:
             errSNap_opt = mag_err_factor * abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub'])
             errSNap_opt_corr = np.sqrt((mag_err_factor * abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub']))**2 + (0.1*ap_corr)**2)
 
-            ulim = -2.5*np.log10(3*np.sqrt(sigsky) * photap[0].area)
+            limiting_flux = 3.0 * sigsky * np.sqrt(photap[0].area)
+            ulim = -2.5*np.log10(limiting_flux)
 
             try:
                 SNpsf = -2.5*np.log10(SNpsfphotTab['flux_fit'])
