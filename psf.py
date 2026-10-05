@@ -2416,21 +2416,23 @@ for f in usedfilters:
 
             print('Converting flux to magnitudes...')
 
+            mag_err_factor = 2.5 / np.log(10.0)
+
             SNap = -2.5*np.log10(SNphotTab['aperture_sum_sub'])
-            # aperture mag error assuming Poisson noise
-            errSNap = abs(SNphotTab['aperture_sum_err_1'] / SNphotTab['aperture_sum_sub'])
+            # propagate aperture flux uncertainty to magnitude uncertainty
+            errSNap = mag_err_factor * abs(SNphotTab['aperture_sum_err_1'] / SNphotTab['aperture_sum_sub'])
 
             SNap_opt = -2.5*np.log10(SNphotTab['aperture_opt_sum_sub'])
             SNap_opt_corr = -2.5*np.log10(SNphotTab['aperture_opt_sum_sub']) + ap_corr
-            # aperture mag error assuming Poisson noise
-            errSNap_opt = abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub'])
-            errSNap_opt_corr = np.sqrt((abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub']))**2 + (0.1*ap_corr)**2)
+            # propagate aperture flux uncertainty to magnitude uncertainty
+            errSNap_opt = mag_err_factor * abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub'])
+            errSNap_opt_corr = np.sqrt((mag_err_factor * abs(SNphotTab['aperture_sum_err_0'] / SNphotTab['aperture_opt_sum_sub']))**2 + (0.1*ap_corr)**2)
 
             ulim = -2.5*np.log10(3*np.sqrt(sigsky) * photap[0].area)
 
             try:
                 SNpsf = -2.5*np.log10(SNpsfphotTab['flux_fit'])
-                errSNpsf = abs(SNpsfphotTab['flux_err']/SNpsfphotTab['flux_fit'])
+                errSNpsf = mag_err_factor * abs(SNpsfphotTab['flux_err']/SNpsfphotTab['flux_fit'])
             except:
                 SNpsf = np.nan
                 errSNpsf = np.nan
